@@ -6,17 +6,17 @@ and run a plugin's interactive flow. Those helpers live here so a plugin can
 drive a session identically over any transport without knowing which one is
 underneath.
 
-The core bootstrap hook (:func:`run_bootstrap`) is the single line each
-transport calls after the protocol handshake: it finds the plugin named by
-config key ``logon_plugin`` (default ``"logon"``) and hands the session to its
-``on_session_start``. If the plugin is missing or broken it sends a minimal
-notice and closes cleanly -- it never hangs.
+Input model (two distinct modes):
 
-Only :meth:`core.app.BBSApp.disconnect` closes sockets; plugins (including
-the sequencer and the menu) request a disconnect through it rather than
-touching writers directly.
+* :func:`read_command` -- LINE mode. Waits for Enter (CR and/or LF) and
+  returns the completed line. Used for usernames, passwords, message text.
+* :func:`read_key` -- KEY mode. Returns the first printable byte the moment
+  it arrives, no Enter. Used for hotkey menus.
+
+Echo policy: SSH echoes keystrokes at the transport layer (``data_received``
+bridge); telnet clients (SyncTERM) do LOCAL echo themselves. Neither reader
+echoes, so there is no double-echo and no raw IAC bytes leak to the display.
 """
-
 from __future__ import annotations
 
 import asyncio
@@ -27,168 +27,93 @@ logger = logging.getLogger("modulo.core.runner")
 IDLE_TIMEOUT = 300  # seconds; a session idle this long is disconnected
 
 
-async def read_command(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
-    """Read and decode one chunk of input from ``session``.
+def _idle(bbs, session) -> None:
+    """Send the idle-timeout notice (fire-and-forget)."""
+    asyncio.ensure_future(bbs.send(session, "\r\n\r\n[Idle timeout. Goodbye!]\r\n"))
 
-    Negotiates telnet control sequences (when the session carries a
-    ``negotiator``) and forwards the responses; SSH sessions carry no
-    negotiator so their already-normalised bytes pass straight through.
 
-    Returns the decoded text, or ``None`` when the connection ended or went
-    idle -- the caller should tear down / return to the menu.
+async def _read_chunk(bbs, session, timeout):
+    """Read one chunk of bytes, handling telnet negotiation.
+
+    Returns the decoded clean text (IAC sequences stripped), or ``None`` on
+    EOF/timeout. Negotiation responses are sent raw and never echoed.
     """
-    neg = getattr(session, "negotiator", None)
-    if getattr(session, "reader", None) is None:
+    reader = getattr(session, "reader", None)
+    if reader is None:
         return None
-
-    # Serve any previously-buffered complete line before touching the wire.
-    # A bare \r is a valid terminator (telnet Enter from many clients).
-    buf = getattr(session, "_line_buffer", "")
-    while True:
-        cr, nl = buf.find("\r"), buf.find("\n")
-        idxs = [x for x in (cr, nl) if x != -1]
-        if not idxs:
-            break
-        cut = min(idxs)
-        line, buf = buf[:cut], buf[cut + 1:]
-        session._line_buffer = buf
-        return line
-    session._line_buffer = buf
+    neg = getattr(session, "negotiator", None)
 
     try:
-        data = await asyncio.wait_for(
-            session.reader.read(1024), timeout=timeout
-        )
+        data = await asyncio.wait_for(reader.read(1024), timeout=timeout)
     except asyncio.TimeoutError:
-        await bbs.send(session, "\r\n\r\n[Idle timeout. Goodbye!]\r\n")
+        _idle(bbs, session)
         return None
     if not data:
-        # EOF: flush a trailing partial line if any, else signal disconnect.
-        leftover = getattr(session, "_line_buffer", "")
-        session._line_buffer = ""
-        return leftover or None
+        return None
 
     session.touch()
     session.bytes_received += len(data)
 
-    # Server-side echo for telnet sessions (SSH echoes at transport layer).
-    # Printable characters echo; CR/LF becomes CRLF; control bytes silent.
-    if neg is not None and not getattr(session, "transport_echoes", False):
-        echo = bytearray()
-        i = 0
-        while i < len(data):
-            b = data[i:i+1]
-            if b in (b"\r", b"\n"):
-                echo += b"\r\n"
-            elif 32 <= data[i] < 127 or data[i] >= 128:
-                echo += b
-            i += 1
-        if echo:
-            await bbs.send(session, echo.decode("latin-1", errors="replace"))
+    if neg is None:
+        return data.decode("latin-1", errors="replace")
 
-    # Split the chunk into lines and hand them out one at a time. Multiple
-    # keystrokes often arrive in one TCP segment (paste, fast typing, or a
-    # scripted client), and callers expect line-at-a-time semantics.
+    clean, responses = neg.process_data(data)
+    for resp in responses or []:
+        await bbs.send_raw(session, resp)
+    session.terminal_width, session.terminal_height = neg.window_size
+    session.terminal_type = neg.terminal_type
+    return clean.decode("latin-1", errors="replace") if clean else ""
+
+
+async def read_command(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
+    """Read one LINE of input (CR/LF-terminated).
+
+    Handles telnet negotiation, buffers until the terminator arrives, and
+    returns the line *without* its terminator. Returns ``None`` on EOF or
+    idle timeout. Never returns a partial line as if it were complete.
+    """
     buf = getattr(session, "_line_buffer", "")
 
-    # If a previous call stashed a partial line with no terminator yet, keep
-    # reading until the line completes -- an empty return means "no input",
-    # which flows treat as disconnect. Loop instead of returning partials.
-    while "\r" not in buf and "\n" not in buf:
-        if neg is None:
-            text_chunk = data.decode("latin-1", errors="replace")
-        else:
-            clean, responses = neg.process_data(data)
-            if responses:
-                for resp in responses:
-                    await bbs.send_raw(session, resp)
-            session.terminal_width, session.terminal_height = neg.window_size
-            session.terminal_type = neg.terminal_type
-            text_chunk = clean.decode("latin-1", errors="replace") if clean else ""
-        if not text_chunk:
-            # Pure control traffic; read again (loop continues below via data refetch)
-            pass
-        buf += text_chunk
-        if "\r" in buf or "\n" in buf:
-            break
-        try:
-            data = await asyncio.wait_for(
-                session.reader.read(1024), timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            await bbs.send(session, "\r\n\r\n[Idle timeout. Goodbye!]\r\n")
-            return None
-        if not data:
-            return None
-        session.touch()
-        session.bytes_received += len(data)
+    while True:
+        # Serve a buffered complete line first.
+        for sep in ("\r\n", "\r", "\n"):
+            if sep in buf:
+                line, rest = buf.split(sep, 1)
+                session._line_buffer = rest
+                return line
 
-    # Telnet clients may send bare \r as Enter; treat CR or LF as terminator.
-    cr = buf.find("\r")
-    nl = buf.find("\n")
-    term = min((x for x in (cr, nl) if x != -1), default=-1)
-    if term == -1:
-        # No newline yet (partial line): stash and let caller call again.
-        session._line_buffer = buf
-        return ""
-    line, rest = buf[:term], buf[term + 1:]
-    session._line_buffer = rest
-    return line
+        chunk = await _read_chunk(bbs, session, timeout)
+        if chunk is None:
+            # EOF / idle: hand back a trailing partial line if one exists.
+            session._line_buffer = ""
+            return buf or None
+        buf += chunk
 
 
 async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
-    """Read a SINGLE keypress -- no Enter required -- for hotkey menus.
+    """Read a SINGLE keypress (no Enter) for hotkey menus.
 
-    Deliberately does NOT go through :func:`read_command`: that function
-    buffers partial lines waiting for Enter, which would swallow a lone
-    menu keypress forever (the "Q inside a plugin hangs" bug). Here a
-    printable byte is returned the moment it arrives; anything typed after
-    it is stashed in ``_line_buffer`` for the next read. Telnet negotiation
-    is handled exactly as in read_command. Hotkeys are not echoed --
-    classic BBS menus don't echo single-key selections.
+    Returns the first printable, non-whitespace character (uppercased), or
+    ``None`` on EOF/timeout. Bytes typed after the key are stashed in
+    ``_line_buffer`` for the next read. Does not echo (see module docstring).
     """
-    neg = getattr(session, "negotiator", None)
-    if getattr(session, "reader", None) is None:
-        return None
+    # Serve a printable char from any stash first.
+    buf = getattr(session, "_line_buffer", "")
+    while buf:
+        ch, buf = buf[0], buf[1:]
+        session._line_buffer = buf
+        if ch.isprintable() and not ch.isspace():
+            return ch.upper()
 
     while True:
-        # Serve a printable character from the stash first, if any.
-        buf = getattr(session, "_line_buffer", "")
-        session._line_buffer = ""
-        for i, ch in enumerate(buf):
-            if ch.isprintable() and not ch.isspace():
-                session._line_buffer = buf[i + 1:]
-                return ch.upper()
-
-        try:
-            data = await asyncio.wait_for(
-                session.reader.read(1024), timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            await bbs.send(session, "\r\n\r\n[Idle timeout. Goodbye!]\r\n")
+        chunk = await _read_chunk(bbs, session, timeout)
+        if chunk is None:
             return None
-        if not data:
-            return None
-        session.touch()
-        session.bytes_received += len(data)
-
-        if neg is None:
-            text = data.decode("latin-1", errors="replace")
-        else:
-            clean, responses = neg.process_data(data)
-            for resp in responses or []:
-                await bbs.send_raw(session, resp)
-            session.terminal_width, session.terminal_height = neg.window_size
-            session.terminal_type = neg.terminal_type
-            text = clean.decode("latin-1", errors="replace") if clean else ""
-
-        for i, ch in enumerate(text):
+        for i, ch in enumerate(chunk):
             if ch.isprintable() and not ch.isspace():
-                # Stash anything typed after the key (fast "MQ" lands as one
-                # TCP segment); the next read serves it in order.
-                session._line_buffer = text[i + 1:]
+                session._line_buffer = chunk[i + 1:]
                 return ch.upper()
-        # Pure control traffic / stray Enters: loop and keep reading.
+        # Pure control / whitespace: loop for a real key.
 
 
 async def run_plugin_flow(bbs, plugin, session) -> bool:

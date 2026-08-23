@@ -221,18 +221,20 @@ class TelnetNegotiator:
                 self.window_size = (width, height)
     
     def _supported_will(self) -> set[int]:
-        """Options we can WILL (offer to do)."""
+        """Options we can WILL (offer to do).
+
+        ECHO is deliberately excluded: we never echo server-side (telnet
+        clients do local echo), so we decline any request to take over echo.
+        """
         return {
-            OPT_ECHO,
             OPT_SUPPRESS_GO_AHEAD,
             OPT_TERMINAL_TYPE,
             OPT_TERMINAL_SPEED,
         }
-    
+
     def _supported_do(self) -> set[int]:
-        """Options we can DO (allow remote to do)."""
+        """Options we can DO (allow remote to do). ECHO excluded (see above)."""
         return {
-            OPT_ECHO,
             OPT_SUPPRESS_GO_AHEAD,
             OPT_TERMINAL_TYPE,
             OPT_WINDOW_SIZE,
@@ -250,20 +252,15 @@ class TelnetNegotiator:
         """Send WILL SUPPRESS-GO-AHEAD."""
         return bytes([IAC, WILL, OPT_SUPPRESS_GO_AHEAD])
     
-    def request_echo(self) -> bytes:
-        """Send WILL ECHO: we (the server) echo typed characters.
-
-        Without this, Syncterm assumes remote echo is off and suppresses
-        its local echo only if told -- net effect over telnet was typed
-        characters never appearing anywhere.
-        """
-        return bytes([IAC, WILL, OPT_ECHO])
-
     def initial_negotiation(self) -> bytes:
-        """Send our initial negotiation offers."""
+        """Send our initial negotiation offers.
+
+        Deliberately does NOT offer ECHO: telnet clients (SyncTERM) do local
+        echo themselves, so the server echoing would double-print and leak
+        raw IAC bytes into the display as CP437 glyphs.
+        """
         return (
             self.suppress_go_ahead() +
-            self.request_echo() +
             self.request_terminal_type() +
             self.request_window_size()
         )
