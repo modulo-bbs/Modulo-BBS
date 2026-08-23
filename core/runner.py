@@ -62,7 +62,31 @@ async def _read_chunk(bbs, session, timeout):
         await bbs.send_raw(session, resp)
     session.terminal_width, session.terminal_height = neg.window_size
     session.terminal_type = neg.terminal_type
-    return clean.decode("latin-1", errors="replace") if clean else ""
+
+    text = clean.decode("latin-1", errors="replace") if clean else ""
+
+    # Server-side echo for telnet (SSH echoes at transport layer).
+    # Echo the CLEAN bytes only -- never raw IAC negotiation, which was the
+    # source of the CP437 glyph garbage. Printable chars echo as-is; CR/LF
+    # becomes CRLF; Backspace erases in place; ESC sequences pass silent.
+    if not getattr(session, "transport_echoes", False):
+        echo = bytearray()
+        i = 0
+        while i < len(clean):
+            b = clean[i:i + 1]
+            if b == b"\x08" or b == b"\x7f":          # Backspace / DEL
+                echo += b"\b \b"
+            elif b == b"\r" or b == b"\n":            # Enter -> CRLF
+                echo += b"\r\n"
+            elif b == b"\x1b":                        # ESC: skip ANSI seq
+                i += 2
+            elif b >= b" ":                            # printable
+                echo += b
+            i += 1
+        if echo:
+            await bbs.send(session, echo.decode("latin-1", errors="replace"))
+
+    return text
 
 
 async def read_command(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
