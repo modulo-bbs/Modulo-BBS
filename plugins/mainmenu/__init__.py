@@ -60,10 +60,11 @@ class MainmenuPlugin(Plugin):
 
         while session.is_active:
             await self.bbs.send(session, self._render(session))
-            text = await runner.read_command(self.bbs, session)
-            if text is None:
+            # Single keypress, no Enter -- menu keys are one character.
+            key = await runner.read_key(self.bbs, session)
+            if key is None:
                 break
-            await self._handle(session, text.strip().upper())
+            await self._handle(session, key)
 
     # -- dispatch -------------------------------------------------------------
 

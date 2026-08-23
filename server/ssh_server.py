@@ -159,6 +159,9 @@ class BBSSSHSession(asyncssh.SSHServerSession):
 
         # No telnet negotiation over SSH: input is already clean text.
         self._session.negotiator = None
+        # SSH transport echoes keystrokes itself (data_received bridge), so
+        # read_command must NOT echo again (double characters otherwise).
+        self._session.transport_echoes = True
         self._session.state = SessionState.CONNECTED
 
         # Core bootstrap hook (identical to the telnet server): the configured

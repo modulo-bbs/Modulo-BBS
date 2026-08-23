@@ -131,19 +131,20 @@ class Terminal:
         await writer.drain()
 
     async def read_line(self, prompt: str = "") -> str:
-        """Send an optional prompt, then read one line (CRLF-terminated)."""
+        """Send an optional prompt, then read one line (CRLF-terminated).
+
+        Uses the core negotiator-aware reader so telnet control bytes are
+        handled and server-side echo fires; SSH sessions (which echo at
+        the transport layer) pass through with echo suppressed there.
+        """
         if prompt:
             await self.send(prompt)
-        reader = getattr(self.session, "reader", None)
-        if reader is None:
+        from core import runner
+
+        text = await runner.read_command(self.bbs, self.session)
+        if text is None:
             return ""
-        try:
-            raw = await reader.readline()
-        except Exception:  # noqa: BLE001 -- EOF/reset should not crash the flow
-            return ""
-        if not raw:
-            return ""  # EOF / disconnect
-        return raw.decode("latin-1", errors="replace").rstrip("\r\n")
+        return text.strip("\r\n")
 
 
 # --- Login flow ---------------------------------------------------------------

@@ -59,6 +59,13 @@ class ScriptReader:
         self.line_calls += 1
         return self.inputs.pop(0).encode("latin-1", errors="replace")
 
+    async def read(self, n=-1):
+        """read_command-compatible chunked read: one line + CR terminator."""
+        if not self.inputs:
+            return b""                       # EOF
+        self.line_calls += 1
+        return self.inputs.pop(0).encode("latin-1", errors="replace") + b"\r"
+
 
 class FakeBBS:
     """Minimal core object exposing what the plugin consumes: ``events``,

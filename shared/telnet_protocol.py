@@ -250,10 +250,20 @@ class TelnetNegotiator:
         """Send WILL SUPPRESS-GO-AHEAD."""
         return bytes([IAC, WILL, OPT_SUPPRESS_GO_AHEAD])
     
+    def request_echo(self) -> bytes:
+        """Send WILL ECHO: we (the server) echo typed characters.
+
+        Without this, Syncterm assumes remote echo is off and suppresses
+        its local echo only if told -- net effect over telnet was typed
+        characters never appearing anywhere.
+        """
+        return bytes([IAC, WILL, OPT_ECHO])
+
     def initial_negotiation(self) -> bytes:
         """Send our initial negotiation offers."""
         return (
             self.suppress_go_ahead() +
+            self.request_echo() +
             self.request_terminal_type() +
             self.request_window_size()
         )
