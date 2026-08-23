@@ -47,8 +47,10 @@ class MessageBoardPlugin(Plugin):
                 lines.append(f" {i}. {b['name']} ({n} msgs)")
             lines.append("")
             await self.bbs.send(session, "\r\n".join(lines) + "\r\n")
-            pick = await self._ask(session, f"{self._k('QUIT')}=back Board #: ")
-            if not pick or pick.upper() == self._k("QUIT"):
+            pick = await self._get_key(session)
+            if pick is None:
+                return False
+            if pick == self._k("QUIT"):
                 return False
             if pick.isdigit() and 1 <= int(pick) <= len(vis):
                 await self._board_menu(session, vis[int(pick) - 1])
@@ -65,11 +67,9 @@ class MessageBoardPlugin(Plugin):
                 lines.append(f" {i}. [{m['author']}] {m['subject']}")
             lines.append("")
             await self.bbs.send(session, "\r\n".join(lines) + "\r\n")
-            cmd = await self._ask(
-                session,
-                f"{self._k('LIST')}=list {self._k('POST')}=post "
-                f"{self._k('DELETE')}=del# {self._k('QUIT')}=back > ",
-            )
+            cmd = await self._get_key(session)
+            if cmd is None:
+                return
             u = cmd.upper()
             if not u or u == self._k("QUIT"):
                 return
@@ -160,14 +160,18 @@ class MessageBoardPlugin(Plugin):
 
     async def _ask(self, session, prompt: str) -> str:
         await self.bbs.send(session, prompt)
-        reader = getattr(session, "reader", None)
-        if reader is None:
+        from core import runner
+
+        text = await runner.read_command(self.bbs, session)
+        if text is None:
             return ""
-        try:
-            raw = await asyncio.wait_for(reader.readline(), timeout=600)
-        except Exception:
-            return ""
-        return raw.decode("latin-1", errors="replace").strip()
+        return text.strip()
+
+    async def _get_key(self, session) -> str | None:
+        """Single keypress, no Enter. None = connection gone."""
+        from core import runner
+
+        return await runner.read_key(self.bbs, session)
 
 
 __all__ = ["MessageBoardPlugin"]

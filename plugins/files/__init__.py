@@ -52,8 +52,8 @@ class FilesPlugin(Plugin):
                 lines.append(f" {i}. {a['name']} ({n} files)")
             lines.append("")
             await self.bbs.send(session, "\r\n".join(lines) + "\r\n")
-            pick = await self._ask(session, f"{self._k('QUIT')}=back Area #: ")
-            if not pick or pick.upper() == self._k("QUIT"):
+            pick = await self._get_key(session)
+            if pick is None or pick == self._k("QUIT"):
                 return False
             if pick.isdigit() and 1 <= int(pick) <= len(vis):
                 await self._area_menu(session, vis[int(pick) - 1])
@@ -71,11 +71,9 @@ class FilesPlugin(Plugin):
                 lines.append(f" {i}. {r['name']} ({kb}k) by {r['uploader']}")
             lines.append("")
             await self.bbs.send(session, "\r\n".join(lines) + "\r\n")
-            cmd = await self._ask(
-                session,
-                f"{self._k('LIST')}=list {self._k('UPLOAD')}=upload "
-                f"{self._k('DOWNLOAD')}=dl# {self._k('QUIT')}=back > ",
-            )
+            cmd = await self._get_key(session)
+            if cmd is None:
+                return
             u = cmd.upper()
             if not u or u == self._k("QUIT"):
                 return
@@ -158,14 +156,17 @@ class FilesPlugin(Plugin):
 
     async def _ask(self, session, prompt: str) -> str:
         await self.bbs.send(session, prompt)
-        reader = getattr(session, "reader", None)
-        if reader is None:
+        from core import runner
+
+        text = await runner.read_command(self.bbs, session)
+        if text is None:
             return ""
-        try:
-            raw = await asyncio.wait_for(reader.readline(), timeout=600)
-        except Exception:
-            return ""
-        return raw.decode("latin-1", errors="replace").strip()
+        return text.strip()
+
+    async def _get_key(self, session) -> str | None:
+        from core import runner
+
+        return await runner.read_key(self.bbs, session)
 
 
 __all__ = ["FilesPlugin"]

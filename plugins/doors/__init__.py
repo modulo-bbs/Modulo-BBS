@@ -93,8 +93,8 @@ class DoorsPlugin(Plugin):
             lines.append(f" [{self._quit_key()}] Back to Main Menu")
             lines.append("")
             await self.bbs.send(session, "\r\n".join(lines) + "\r\n")
-            pick = await self._ask(session, "Door: ")
-            if not pick or pick.upper() == self._quit_key():
+            pick = await self._get_key(session)
+            if pick is None or pick == self._quit_key():
                 return False
             pick_u = pick.upper()
             if pick_u in key_for:
@@ -127,17 +127,18 @@ class DoorsPlugin(Plugin):
         return self._qkey
 
     async def _ask(self, session, prompt: str) -> str:
-        import asyncio
-
         await self.bbs.send(session, prompt)
-        reader = getattr(session, "reader", None)
-        if reader is None:
+        from core import runner
+
+        text = await runner.read_command(self.bbs, session)
+        if text is None:
             return ""
-        try:
-            raw = await asyncio.wait_for(reader.readline(), timeout=300)
-        except Exception:
-            return ""
-        return raw.decode("latin-1", errors="replace").strip()
+        return text.strip()
+
+    async def _get_key(self, session) -> str | None:
+        from core import runner
+
+        return await runner.read_key(self.bbs, session)
 
 
 __all__ = ["DoorsPlugin"]

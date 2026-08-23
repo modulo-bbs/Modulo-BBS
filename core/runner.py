@@ -38,6 +38,8 @@ async def read_command(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
     idle -- the caller should tear down / return to the menu.
     """
     neg = getattr(session, "negotiator", None)
+    if getattr(session, "reader", None) is None:
+        return None
     try:
         data = await asyncio.wait_for(
             session.reader.read(1024), timeout=timeout
@@ -66,10 +68,32 @@ async def read_command(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
     return clean.decode("latin-1", errors="replace")
 
 
+async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
+    """Read a SINGLE keypress (no Enter required) for hotkey menus.
+
+    Uses the same negotiator-aware path as :func:`read_command`, so telnet
+    control bytes are consumed and answered rather than leaking into the
+    key. Returns the first printable character of the chunk, uppercased,
+    or ``None`` on disconnect/timeout (same contract as read_command).
+    """
+    text = await read_command(bbs, session, timeout=timeout)
+    if text is None:
+        return None
+    for ch in text:
+        if ch.isprintable() and not ch.isspace():
+            return ch.upper()
+    # Chunk was all control data / newlines: keep waiting for a real key.
+    return await read_key(bbs, session, timeout=timeout)
+
+
 async def run_plugin_flow(bbs, plugin, session) -> bool:
-    """Enter a menu plugin: run its session-start hook, then its command loop
-    until ``handle_command`` returns False (return to the menu) or the session
-    ends. Returns True if the session is still active on exit.
+    """Enter a menu plugin: run its ``on_session_start`` flow and return.
+
+    The plugin owns its whole interaction loop inside ``on_session_start``
+    (reading input itself via ``read_command``/``read_key``). Returning
+    False (or the session dying) pops back to the caller's menu. There is
+    deliberately no outer command loop here -- that double loop was the
+    cause of "Q needs two Enters".
     """
     try:
         result = plugin.on_session_start(session)
@@ -77,22 +101,6 @@ async def run_plugin_flow(bbs, plugin, session) -> bool:
             await result
     except Exception:  # noqa: BLE001
         logger.exception("plugin %s on_session_start failed", plugin.name)
-
-    while session.is_active:
-        text = await read_command(bbs, session)
-        if text is None:
-            return session.is_active
-        if text:
-            try:
-                result = plugin.handle_command(session, text)
-                if asyncio.iscoroutine(result):
-                    result = await result
-                stay = bool(result)
-            except Exception:  # noqa: BLE001
-                logger.exception("plugin %s handle_command failed", plugin.name)
-                stay = False
-            if not stay:
-                break
     return session.is_active
 
 

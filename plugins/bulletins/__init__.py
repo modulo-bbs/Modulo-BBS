@@ -122,14 +122,10 @@ class BulletinsPlugin(Plugin):
         return True
 
     async def _read_key(self, session) -> str:
-        reader = getattr(session, "reader", None)
-        if reader is None:
-            return ""
-        try:
-            data = await asyncio.wait_for(reader.read(1), timeout=120)
-        except Exception:
-            return ""
-        return (data or b" ").decode("latin-1", errors="replace")
+        from core import runner
+
+        key = await runner.read_key(self.bbs, session)
+        return key or ""
 
     # -- flows ---------------------------------------------------------------
 
@@ -176,14 +172,12 @@ class BulletinsPlugin(Plugin):
 
     async def _ask(self, session, prompt: str) -> str:
         await self.bbs.send(session, prompt)
-        reader = getattr(session, "reader", None)
-        if reader is None:
+        from core import runner
+
+        text = await runner.read_command(self.bbs, session)
+        if text is None:
             return ""
-        try:
-            raw = await asyncio.wait_for(reader.readline(), timeout=300)
-        except Exception:
-            return ""
-        return raw.decode("latin-1", errors="replace").strip()
+        return text.strip()
 
 
 __all__ = ["BulletinsPlugin"]

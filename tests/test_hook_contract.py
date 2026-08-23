@@ -59,11 +59,27 @@ class FakeBBS:
 
 
 def test_async_handle_command_is_awaited():
-    """An async handle_command runs and its False returns to the menu."""
+    """An async handle_command runs and its False returns to the menu.
+
+    Since run_plugin_flow delegates the whole interaction to
+    on_session_start, the plugin drives handle_command itself; core only
+    guarantees it awaits async hooks when called through the runner.
+    """
 
     class P(Plugin):
         name = "async-cmd"
         version = "1.0.0"
+        commands = ["hello", "QUIT"]
+
+        async def on_session_start(self, session):
+            from core import runner
+
+            for cmd in self.commands:
+                result = self.handle_command(session, cmd)
+                if asyncio.iscoroutine(result):
+                    result = await result
+                if not result:
+                    break
 
         async def handle_command(self, session, command):
             await FakeBBS().send(session, f"echo: {command}")
