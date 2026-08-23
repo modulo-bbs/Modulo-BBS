@@ -18,6 +18,7 @@ as a step in the logon sequence. Hotkey-selected plugins are entered via
 
 from __future__ import annotations
 
+import asyncio
 import sys
 
 from plugins.base import Plugin
@@ -79,6 +80,11 @@ class MainmenuPlugin(Plugin):
             await self.bbs.send(session, self._system_info(session))
             return
 
+        # Sysop-only: graceful shutdown with confirmation.
+        if choice == "X":
+            await self._sysop_shutdown(session)
+            return
+
         for plugin in self._menuable():
             if choice == plugin.menu_key.upper():
                 self.bbs.events.emit("menu:select", {
@@ -108,10 +114,32 @@ class MainmenuPlugin(Plugin):
             else:
                 lines.append(C + f"  [{plugin.menu_key.upper()}] {label}" + R)
         lines.append(C + "  [I] System Info" + R)
+        # Show shutdown option only to sysops.
+        user = getattr(session, "user", None)
+        if user and user.in_group("sysop"):
+            lines.append(C + "  [X] Shutdown" + R)
         lines.append(C + "  [Q] Disconnect" + R)
         lines.append("")
         lines.append(W + "  Select: " + R)
         return "\r\n".join(lines)
+
+    async def _sysop_shutdown(self, session) -> None:
+        """Confirm and execute a graceful BBS shutdown (sysop only)."""
+        user = getattr(session, "user", None)
+        if not user or not user.in_group("sysop"):
+            await self.bbs.send(session, "\r\nInvalid selection.\r\n")
+            return
+
+        await self.bbs.send(session, "\r\nShutdown the BBS? [Y/N] ")
+        key = await runner.read_key(self.bbs, session)
+        if key != "Y":
+            return
+
+        await self.bbs.send(session, "\r\nShutting down...\r\n")
+        if self.bbs.server:
+            # Schedule shutdown on the event loop so this coroutine can
+            # return cleanly — stop() closes all writers including ours.
+            asyncio.ensure_future(self.bbs.server.stop("SysOp shutdown. Goodbye!"))
 
     def _system_info(self, session) -> str:
         """Static system information block."""

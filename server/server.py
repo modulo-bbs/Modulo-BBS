@@ -78,16 +78,23 @@ class BBSServer:
 
         async with self._server:
             await self._server.serve_forever()
+        # serve_forever() is cancelled by stop() calling server.close();
+        # the CancelledError is expected and not an error.
 
-    async def stop(self):
-        """Gracefully stop the server."""
+    async def stop(self, message: str = "BBS shutting down. Goodbye!"):
+        """Gracefully stop the server.
+
+        Args:
+            message: Shutdown notice sent to every connected session before
+                closing their connections.  Defaults to the standard goodbye.
+        """
         logger.info("Shutting down BBS server...")
         self._running = False
 
         for session in list(self.session_manager.active_sessions):
             if session.writer:
                 try:
-                    await self._send(session, "\r\n\r\n[BBS shutting down. Goodbye!]\r\n")
+                    await self._send(session, f"\r\n\r\n[{message}]\r\n")
                     session.writer.close()
                     await session.writer.wait_closed()
                 except Exception:

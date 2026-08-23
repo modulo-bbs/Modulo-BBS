@@ -29,3 +29,13 @@ logon_sequence:
   - screen:welcome.txt
   - plugin:bulletins
   - plugin:mainmenu
+
+# HTTP control API (health, sessions, shutdown, broadcast).
+# Disabled by default — set enabled: true to start the API server.
+api:
+  enabled: false
+  host: "127.0.0.1"
+  port: 8080
+  # keys:
+  #   - name: "admin"
+  #     key: "replace-with-a-real-secret"

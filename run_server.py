@@ -199,3 +199,6 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
+    except asyncio.CancelledError:
+        # Graceful API-triggered shutdown — stop() cancels serve_forever().
+        pass
