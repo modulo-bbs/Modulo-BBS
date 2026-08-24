@@ -23,7 +23,7 @@ from server.session import Session, SessionManager, SessionState
 
 
 def _pad_line(text: str, width: int) -> str:
-    """Pad every CRLF-terminated line to ``width`` visible characters.
+    """Pad every CRLF-terminated line to ``width - 1`` visible characters.
 
     Classic BBS discipline: each displayed row must fill the terminal width
     so no character from a previous render bleeds through on a shorter line.
@@ -31,11 +31,18 @@ def _pad_line(text: str, width: int) -> str:
     fragment (if the text doesn't end with ``\\r\\n``) is left untouched so
     bare escape commands like ``\\x1b[2J`` aren't polluted with trailing
     spaces.
+
+    We pad to *width - 1*, not width: writing the 80th column on Syncterm
+    (and most ANSI terminals) immediately wraps the cursor to the next line,
+    so a padded-to-80 line plus ``\\r\\n`` produces a phantom blank row
+    after every line (the double-spacing bug). Leaving the last column empty
+    still overwrites ghost characters while keeping ``\\r\\n`` clean.
     """
     if not text or width <= 0:
         return text
     from shared.codecs import _ANSI_RE
 
+    target = width - 1
     lines = text.split("\r\n")
     padded = []
     for i, line in enumerate(lines):
@@ -43,8 +50,8 @@ def _pad_line(text: str, width: int) -> str:
         is_row = i < len(lines) - 1 or text.endswith("\r\n")
         if is_row:
             visible = len(_ANSI_RE.sub("", line))
-            if visible < width:
-                line = line + " " * (width - visible)
+            if visible < target:
+                line = line + " " * (target - visible)
         padded.append(line)
     return "\r\n".join(padded)
 
