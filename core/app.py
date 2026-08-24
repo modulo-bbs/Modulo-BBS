@@ -98,10 +98,11 @@ class BBSApp:
     async def send(self, session: Session, text: str) -> None:
         """Send ``text`` to ``session``.
 
-        Prefers delegating to the running server's ``_send`` so ANSI stripping
-        (plain-text mode) and writer lifecycle checks stay consistent. Falls
-        back to writing directly to ``session.writer`` (tests / headless
-        sessions that have no attached server).
+        Prefers delegating to the running server's ``_send`` so codec
+        selection (per-session CP437/UTF-8), ANSI stripping in plain-text
+        mode, and writer lifecycle checks stay consistent. Falls back to
+        writing directly to ``session.writer`` (tests / headless sessions
+        that have no attached server).
         """
         if self.server is not None and hasattr(self.server, "_send"):
             await self.server._send(session, text)
@@ -109,7 +110,9 @@ class BBSApp:
         writer = getattr(session, "writer", None)
         if writer is None:
             return
-        writer.write(text.encode("latin-1", errors="replace"))
+        from shared.codecs import encode_out
+
+        writer.write(encode_out(text, getattr(session, "codec", "cp437")))
         await writer.drain()
 
     async def send_raw(self, session: Session, data: bytes) -> None:

@@ -163,12 +163,18 @@ class BBSServer:
             logger.info(f"Session {session_id} closed")
 
     async def _send(self, session: Session, text: str):
-        """Send text to a session. Strips ANSI in plain_text mode."""
+        """Send text to a session.
+
+        Strips ANSI in plain_text mode; encodes with the session's codec
+        (per-session CP437/UTF-8/ASCII — see shared/codecs.py).
+        """
         if not session.writer or session.writer.is_closing():
             return
         if self.plain_text:
             text = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
-        data = text.encode('latin-1', errors='replace')
+        from shared.codecs import encode_out
+
+        data = encode_out(text, getattr(session, "codec", "cp437"))
         session.writer.write(data)
         await session.writer.drain()
         session.bytes_sent += len(data)

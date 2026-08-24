@@ -37,25 +37,36 @@ async def _read_chunk(bbs, session, timeout):
 
     Returns the decoded clean text (IAC sequences stripped), or ``None`` on
     EOF/timeout. Negotiation responses are sent raw and never echoed.
+    Bytes pushed back by the codec probe are served first.
     """
     reader = getattr(session, "reader", None)
     if reader is None:
         return None
-    neg = getattr(session, "negotiator", None)
 
-    try:
-        data = await asyncio.wait_for(reader.read(1024), timeout=timeout)
-    except asyncio.TimeoutError:
-        _idle(bbs, session)
-        return None
-    if not data:
-        return None
+    from shared.codecs import take_pushback
+
+    pushed = take_pushback(session)
+    if pushed:
+        data = pushed
+    else:
+        neg = getattr(session, "negotiator", None)
+
+        try:
+            data = await asyncio.wait_for(reader.read(1024), timeout=timeout)
+        except asyncio.TimeoutError:
+            _idle(bbs, session)
+            return None
+        if not data:
+            return None
 
     session.touch()
     session.bytes_received += len(data)
 
+    from shared.codecs import decode_in
+
+    neg = getattr(session, "negotiator", None)
     if neg is None:
-        return data.decode("latin-1", errors="replace")
+        return decode_in(data, getattr(session, "codec", "cp437"))
 
     clean, responses = neg.process_data(data)
     for resp in responses or []:
@@ -63,7 +74,9 @@ async def _read_chunk(bbs, session, timeout):
     session.terminal_width, session.terminal_height = neg.window_size
     session.terminal_type = neg.terminal_type
 
-    text = clean.decode("latin-1", errors="replace") if clean else ""
+    text = (
+        decode_in(clean, getattr(session, "codec", "cp437")) if clean else ""
+    )
 
     # Server-side echo for telnet (SSH echoes at transport layer).
     # Echo the CLEAN bytes only -- never raw IAC negotiation, which was the
@@ -84,7 +97,10 @@ async def _read_chunk(bbs, session, timeout):
                 echo += b
             i += 1
         if echo:
-            await bbs.send(session, echo.decode("latin-1", errors="replace"))
+            await bbs.send(
+                session,
+                decode_in(bytes(echo), getattr(session, "codec", "cp437")),
+            )
 
     return text
 

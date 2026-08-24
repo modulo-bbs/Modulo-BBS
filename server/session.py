@@ -46,6 +46,10 @@ class Session:
     terminal_width: int = 80
     terminal_height: int = 24
     terminal_type: str = "UNKNOWN"
+    # Wire character codec for this session ("cp437" | "utf-8" | "ascii").
+    # Default matches ANSI-BBS/Syncterm; login flow refines it via
+    # detection (shared.codecs.detect_codec) and user preference.
+    codec: str = "cp437"
     
     # Transport references (set when connection is fully established)
     reader: asyncio.StreamReader | None = None

@@ -127,7 +127,11 @@ class Terminal:
         writer = getattr(self.session, "writer", None)
         if writer is None:
             return
-        writer.write(text.encode("latin-1", errors="replace"))
+        from shared.codecs import encode_out
+
+        writer.write(
+            encode_out(text, getattr(self.session, "codec", "cp437"))
+        )
         await writer.drain()
 
     async def read_line(self, prompt: str = "") -> str:
@@ -222,6 +226,27 @@ class LoginFlow:
         session.authenticated = True
         if SessionState is not None:
             session.state = SessionState.MAIN_MENU
+
+        # --- character codec selection -----------------------------------
+        # Order (per 2026-08-23 research; see shared/codecs.py notes):
+        #   1. saved user preference
+        #   2. active UTF-8 probe (DSR cursor trick — the only true detector,
+        #      works over SSH where TTYPE doesn't exist)
+        #   3. TERMINAL-TYPE name heuristics (ANSI-BBS -> cp437 etc.)
+        #   4. default cp437 (never block login on a question; users change
+        #      encoding via preferences/web console)
+        from shared.codecs import DEFAULT_CODEC, detect_codec, normalize, probe_utf8
+
+        saved = (user.preferences or {}).get("encoding")
+        if saved:
+            session.codec = normalize(saved)
+        else:
+            probed = await probe_utf8(self.bbs, session)
+            if probed:
+                session.codec = probed
+            else:
+                heuristic = detect_codec(getattr(session, "terminal_type", None))
+                session.codec = heuristic or DEFAULT_CODEC
 
         try:
             await self.bbs.users.update(
