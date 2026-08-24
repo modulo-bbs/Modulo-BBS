@@ -106,6 +106,32 @@ class TestScreenCommand:
         assert "Machine view OFF" in text_of(sysop2)
         assert "FANCY SKIN" in app.screens.render(sysop2, "mainmenu", "main")
 
+    def test_regular_user_can_toggle_too(self, app, tmp_path):
+        """/screen is a general preference: plain output for anyone.
+
+        A non-sysop toggling ON gets the same generated menu minus the
+        commands their groups don't grant — nothing exposed, nothing hidden.
+        """
+        d = tmp_path / "plugins" / "mainmenu" / "screens"
+        d.mkdir(parents=True)
+        (d / "main.txt").write_bytes(b"FANCY SKIN")
+
+        from plugins.mainmenu import MainmenuPlugin
+
+        MainmenuPlugin().on_load(app)
+
+        pleb = make_session()
+        pleb.user = run(_real_user(app, "plain_jane", ["user"]))
+        run(_drive(app, pleb, "/screen"))  # toggle ON
+
+        out = text_of(pleb)
+        assert "Machine view ON" in out
+
+        rendered = app.screens.render(pleb, "mainmenu", "main")
+        assert "FANCY SKIN" not in rendered          # skin bypassed
+        assert "Main Menu" in rendered               # generated served
+        assert "[I] System Info" in rendered         # theirs to use
+
     def test_screen_filters_by_permission(self, app, tmp_path):
         """Sysop sees [X]; regular user does not."""
         from plugins.mainmenu import MainmenuPlugin

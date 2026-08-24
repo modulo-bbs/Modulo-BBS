@@ -53,9 +53,19 @@ class FakeChan:
 
 
 def _make_app(tmp_path):
-    """BBSApp wired to throwaway users storage, with the core-plugin stack
-    (login + logon sequencer + mainmenu) loaded."""
+    """BBSApp wired to throwaway users + throwaway screens tree.
+
+    Pointing the screen service at tmp_path keeps live sysop reskins
+    (plugins/*/screens overrides) out of test runs.
+    """
     app = BBSApp(users_dir=tmp_path / "users")
+    app.screens.plugins_root = tmp_path
+    # Minimal board-global logon screens (logon resolves them from the
+    # project-root-equivalent "screens/" under plugins_root).
+    screens = tmp_path / "screens"
+    screens.mkdir(parents=True, exist_ok=True)
+    (screens / "splash.txt").write_bytes(b"Welcome to Modulo BBS\r\n")
+    (screens / "welcome.txt").write_bytes(b"WELCOME ABOARD\r\n")
     plugins = [LoginPlugin(), LogonPlugin(), MainmenuPlugin()]
     for plugin in plugins:
         plugin.on_load(app)

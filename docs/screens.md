@@ -76,15 +76,17 @@ Because a reskin can hide the real commands, every line-mode input loop
 supports the **`/screen`** command (recommended plugin convention):
 
 - `/screen` — **toggle** machine view. When ON, *all* screens render as
-  generated defaults (permission-filtered), skipping sysop skins entirely.
-  The choice is saved in your user preferences and persists across logins.
+  generated defaults, skipping skins entirely. Saved in your preferences;
+  persists across logins.
 - `/screen <plugin> [name]` — one-shot peek at a generated screen without
   toggling.
 - `/help` — lists registered slash commands; plugins add their own via
   `core.slash.register`.
 
-Machine view is the sysop's work mode: artsy menus for visitors, honest
-menus for you, one keystroke to flip.
+This is a **general preference, open to every user** — some folks simply
+like plain output. Generated menus are rendered from the caller's own
+permissions, so each person sees exactly what they can use and nothing
+else; there is nothing gated about the toggle itself.
 
 Single-key menus accept a leading `/` too: pressing `/` switches that keypress
 into a line read for the command.
