@@ -187,21 +187,21 @@ class MainmenuPlugin(Plugin):
 
         is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
         if is_plain:
-            top = "+" + "-" * 78 + "+"
-            bot = "+" + "-" * 78 + "+"
+            top = "+" + "-" * 77 + "+"
+            bot = "+" + "-" * 77 + "+"
             hint = "        up/dn select      "
             # center hint under top border
-            top = "+" + "-" * 20 + "/" + hint + "\\" + "-" * (78 - 20 - len(hint) - 1) + "+"
+            top = "+" + "-" * 20 + "/" + hint + "\\" + "-" * (77 - 20 - len(hint) - 1) + "+"
         else:
-            top = f"{ANSI.DIM}┌{'─' * 78}┐{ANSI.RESET}"
-            bot = f"{ANSI.DIM}└{'─' * 78}┘{ANSI.RESET}"
+            top = f"{ANSI.DIM}┌{'─' * 77}┐{ANSI.RESET}"
+            bot = f"{ANSI.DIM}└{'─' * 77}┘{ANSI.RESET}"
             hint = "        up/dn select      "
-            top = f"{ANSI.DIM}┌{'─' * 20}┤{hint}├{'─' * (78 - 20 - len(hint) - 1)}┐{ANSI.RESET}"
+            top = f"{ANSI.DIM}┌{'─' * 20}┤{hint}├{'─' * (77 - 20 - len(hint) - 1)}┐{ANSI.RESET}"
 
         lines = [top]
         if not convs:
             label = tab.get('label','conversations').lower()
-            lines.append(f"│  (no {label} yet)".ljust(79) + "│")
+            lines.append(f"│  (no {label} yet)".ljust(77) + "│")
         else:
             selected = getattr(session, "_pim_selected", 0)
             if selected < 0:
@@ -237,7 +237,7 @@ class MainmenuPlugin(Plugin):
                     else:
                         row = f"│{ANSI.REVERSE} {preview[:74].ljust(74)} {ANSI.RESET} │"
                 else:
-                    row = f"│  {preview[:76].ljust(76)} │"
+                    row = f"│  {preview[:74].ljust(74)} │"
                 lines.append(row)
         lines.append(bot)
         lines.append("  Up/Dn or 1/2/3 to switch tabs, Enter to open, Q to disconnect")
