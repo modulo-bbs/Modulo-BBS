@@ -26,6 +26,23 @@ logger = logging.getLogger("modulo.core.runner")
 
 IDLE_TIMEOUT = 300  # seconds; a session idle this long is disconnected
 
+_ARROW_MAP = {
+    "\x1b[A": "UP", "\x1b[B": "DOWN", "\x1b[C": "RIGHT", "\x1b[D": "LEFT",
+    "\x1bOA": "UP", "\x1bOB": "DOWN", "\x1bOC": "RIGHT", "\x1bOD": "LEFT",
+}
+
+def _try_arrow(buf: str):
+    if buf.startswith(("\x1b[", "\x1bO")):
+        if len(buf) < 3:
+            return None  # incomplete
+        seq = buf[:3]
+        rest = buf[3:]
+        key = _ARROW_MAP.get(seq)
+        if key:
+            return key, rest
+        return "__SKIP__", rest
+    return False
+
 
 def _idle(bbs, session) -> None:
     """Send the idle-timeout notice (fire-and-forget)."""
@@ -142,25 +159,16 @@ async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
     # Serve a printable char from any stash first.
     buf = getattr(session, "_line_buffer", "")
     while buf:
-        # Check for stashed arrow/enter sequences first
-        if buf.startswith("\x1b["):
-            if len(buf) >= 3:
-                seq = buf[:3]
-                rest = buf[3:]
-                session._line_buffer = rest
-                if seq == "\x1b[A":
-                    return "UP"
-                if seq == "\x1b[B":
-                    return "DOWN"
-                if seq == "\x1b[C":
-                    return "RIGHT"
-                if seq == "\x1b[D":
-                    return "LEFT"
-                # unknown ESC sequence: skip
+        # Check for stashed arrow/enter sequences first (both ESC[ and ESCO)
+        r = _try_arrow(buf)
+        if r is None:
+            break  # incomplete ESC — wait for more bytes
+        if r is not False:
+            key, rest = r
+            session._line_buffer = rest
+            if key == "__SKIP__":
                 continue
-            else:
-                # incomplete — wait for more bytes
-                break
+            return key
         if buf[0] in ("\r", "\n"):
             session._line_buffer = buf[1:]
             return "ENTER"
@@ -177,24 +185,17 @@ async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
         # arrow sequences that arrived split across chunks still work.
         buf = getattr(session, "_line_buffer", "") + chunk
         session._line_buffer = buf
-        # Try to consume one key from the stashed buf
+        # Try to consume one key from the stashed buf (handles ESC[ and ESCO)
         buf = session._line_buffer
-        if buf.startswith("\x1b["):
-            if len(buf) >= 3:
-                seq = buf[:3]
-                session._line_buffer = buf[3:]
-                if seq == "\x1b[A":
-                    return "UP"
-                if seq == "\x1b[B":
-                    return "DOWN"
-                if seq == "\x1b[C":
-                    return "RIGHT"
-                if seq == "\x1b[D":
-                    return "LEFT"
+        r = _try_arrow(buf)
+        if r is None:
+            continue  # incomplete ESC — read more
+        if r is not False:
+            key, rest = r
+            session._line_buffer = rest
+            if key == "__SKIP__":
                 continue
-            else:
-                # incomplete ESC — read more
-                continue
+            return key
         for i, ch in enumerate(buf):
             if ch in ("\r", "\n"):
                 session._line_buffer = buf[i + 1 :]

@@ -203,7 +203,16 @@ class MainmenuPlugin(Plugin):
             label = tab.get('label','conversations').lower()
             lines.append(f"│  (no {label} yet)".ljust(79) + "│")
         else:
-            for c in convs:
+            selected = getattr(session, "_pim_selected", 0)
+            if selected < 0:
+                selected = 0
+            if selected >= len(convs):
+                selected = max(0, len(convs) - 1)
+                try:
+                    session._pim_selected = selected  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+            for idx, c in enumerate(convs):
                 # preview: last message author + age + body preview
                 title = c.get("title", c.get("id", "?"))[:28]
                 preview = ""
@@ -221,10 +230,17 @@ class MainmenuPlugin(Plugin):
                         preview = f"{title} (no messages)"
                 except Exception:
                     preview = title
-                row = f"│  {preview[:76].ljust(76)} │"
+                is_sel = idx == selected
+                if is_sel:
+                    if is_plain:
+                        row = f"│> {preview[:74].ljust(74)} │"
+                    else:
+                        row = f"│{ANSI.REVERSE} {preview[:74].ljust(74)} {ANSI.RESET} │"
+                else:
+                    row = f"│  {preview[:76].ljust(76)} │"
                 lines.append(row)
         lines.append(bot)
-        lines.append("  ↑/↓ or 1/2/3 to switch tabs, Enter to open, Q to disconnect")
+        lines.append("  Up/Dn or 1/2/3 to switch tabs, Enter to open, Q to disconnect")
         return "\r\n".join(lines)
 
     async def _handle_pim_key(self, session, key: str) -> bool:
