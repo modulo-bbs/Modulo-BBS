@@ -181,6 +181,12 @@ async def main():
     # logon sequencer reads logon_sequence), load plugins, then wire servers.
     bbs = BBSApp(max_nodes=max_nodes, config=config)
     bbs.plugins = await PluginLoader().load(bbs)
+    # One-time migration: legacy messageboard/chat → unified conversations
+    # (idempotent; no-op when index already populated).
+    try:
+        await bbs.conversations.migrate_legacy()
+    except Exception:  # noqa: BLE001 -- migration must not block boot
+        logging.getLogger("run_server").exception("conversations migration failed")
 
     server = BBSServer(bbs=bbs, host=host, port=port, plain_text=plain_text)
 

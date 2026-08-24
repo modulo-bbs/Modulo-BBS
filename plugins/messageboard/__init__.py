@@ -30,6 +30,21 @@ class MessageBoardPlugin(Plugin):
         self.store = BoardStore(d)
         self.boards = load_boards(d)
         self.keys = bbs.keys_for("messageboard", DEFAULT_KEYS)
+        # Opportunistic migration into the unified conversations store
+        # (idempotent; runs once per process, no-op on second call).
+        try:
+            import asyncio
+
+            # If an event loop is already running (tests), schedule;
+            # otherwise the first real BBS loop will run it via
+            # bbs.conversations.migrate_legacy() explicitly at startup
+            # (run_server.py calls it). We schedule here as best-effort
+            # so manual plugin reloads also migrate.
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(bbs.conversations.migrate_legacy())
+        except RuntimeError:
+            pass
 
     def visible_boards(self, user) -> list[dict]:
         return [b for b in self.boards if user.can_access(b.get("requires", []))]

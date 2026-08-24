@@ -197,3 +197,36 @@ def test_dm_visibility_only_participants_and_sysop(tmp_path):
         assert any(c["id"] == "dm1" for c in await app.conversations.list_conversations(visible_to=sysop))
 
     _run(_a())
+
+
+def test_migrate_legacy_boards(tmp_path):
+    """Idempotent import of old messageboard files into conversations."""
+    app = _app(tmp_path)
+    # Simulate old messageboard data in the same isolated plugins_dir
+    mb_root = app.storage.dir("messageboard")
+    import json
+
+    boards = [{"id": "general", "name": "General Discussion", "requires": []}]
+    (mb_root / "boards.json").write_text(json.dumps(boards), encoding="utf-8")
+    # two legacy messages
+    gdir = mb_root / "general"
+    gdir.mkdir(parents=True, exist_ok=True)
+    (gdir / "1.json").write_text(json.dumps({"id": 1, "author": "dave", "subject": "hi", "body": "hello", "timestamp": "2026-01-01T00:00:00+00:00"}), encoding="utf-8")
+    (gdir / "2.json").write_text(json.dumps({"id": 2, "author": "ana", "subject": "re", "body": "world", "timestamp": "2026-01-01T01:00:00+00:00"}), encoding="utf-8")
+
+    async def _a():
+        counts = await app.conversations.migrate_legacy()
+        assert counts["boards"] == 1
+        lst = await app.conversations.list_conversations(kind="board")
+        assert any(c["id"] == "general" for c in lst)
+        msgs = await app.conversations.list_messages("general")
+        assert len(msgs) == 2
+        assert msgs[0]["body"] == "hello"
+        # second call is idempotent
+        counts2 = await app.conversations.migrate_legacy()
+        assert counts2["boards"] == 0
+        msgs2 = await app.conversations.list_messages("general")
+        assert len(msgs2) == 2
+
+    _run(_a())
+
