@@ -1,79 +1,155 @@
-# Modulo BBS — Plugin System Build Plan
+# Modulo BBS — Build Plan (Rail)
 
-> **Status: COMPLETE.** All six original tasks shipped and tested (see
-> `docs/architecture.md` for what exists today). This file is retained as the
-> historical record of the foundation build. Current roadmap lives in
-> `docs/one-api.md` (One-API principle: ops registry → /api/v1 dispatch →
-> web dashboard + terminal sysop menu as first consumers).
+> **This is the rail.** Every build commit references a section here. When the build diverges, the commit message notes which section it diverged from so post-hoc audit is mechanical. No code is written without a plan entry.
 
-## Task 1: Event Bus (core/events.py)
-**Goal:** Publish/subscribe system for inter-module communication.
-**Spec:** See `docs/plugin-spec.md` — Event Bus section.
-**Deliverables:**
-- `core/events.py` with `EventBus` class
-- Methods: `emit(event, data)`, `on(event, handler)`, `once(event, handler)`, `off(event, handler)`
-- Async handlers (run in event loop)
-- Core lifecycle events: session:connect, session:disconnect, user:login, user:logout, menu:open, menu:select, command:pre, command:post
-**Test:** Unit test that emits events and verifies handlers fire.
+## Status
 
-## Task 2: User Model (core/user.py)
-**Goal:** User data structure + CRUD operations.
-**Spec:** See `docs/plugin-spec.md` — User Model section.
-**Deliverables:**
-- `core/user.py` with `User` dataclass and `UserManager` class
-- Fields: username, display_name, password_hash, email, created, last_login, groups, stats, preferences
-- Methods: get, create, update, delete, list
-- Storage: `users/` directory at project root (JSON files)
-- `user.in_group(group)` and `user.can_access(requires)` methods
-- Password hashing with bcrypt
-**Test:** Unit test that creates user, retrieves, updates, checks groups.
+| Phase | Description | Status |
+|---|---|---|
+| 0 | Foundation: event bus, user model, plugin base, loader, auth, session binding | **COMPLETE** (Tasks 1–6 below, shipped, 246 tests at `15bd54c`) |
+| 1 | One-API + screens + tabbed PIM home | **PLANNED — this document** |
 
-## Task 3: Plugin Base Class (plugins/base.py)
-**Goal:** Define the plugin interface.
-**Spec:** See `docs/plugin-spec.md` — Plugin System section.
-**Deliverables:**
-- `plugins/base.py` with `Plugin` base class
-- Required attributes: name, version, description, menu_label, menu_key, menu_order
-- Lifecycle methods: on_load, on_unload, on_session_start, on_session_end, handle_command
-- Type hints for all methods
-**Test:** Import test, verify abstract methods exist.
+Historical Tasks 1–6 are retained below as the record of the foundation build. Current roadmap is Phase 1.
 
-## Task 4: Plugin Loader (core/loader.py)
-**Goal:** Scan plugins/ directory, import, and register plugins.
-**Deliverables:**
-- `core/loader.py` with `PluginLoader` class
-- Scans `plugins/*/` for `__init__.py` with Plugin subclass
-- Calls `plugin.on_load(bbs)` for each
-- Returns list of loaded plugins
-- Handles errors gracefully (log and skip broken plugins)
-**Test:** Create a mock plugin, verify loader finds and loads it.
+---
 
-## Task 5: Auth Plugin (plugins/auth/)
-**Goal:** Extract login/registration from core into a plugin.
-**Spec:** See `docs/plugin-spec.md` — Auth System section.
-**Depends on:** Tasks 1, 2, 3
-**Deliverables:**
-- `plugins/auth/__init__.py` with AuthPlugin class
-- Login screen (username + password prompt)
-- Registration flow (username, password, display name)
-- Password verification against stored hash
-- Emits: user:login, user:logout, auth:register, auth:login_failed
-- Uses User model for storage
-**Test:** Integration test that creates user, logs in, verifies session.user is set.
+## Phase 0 — Foundation (COMPLETE, retained for audit)
 
-## Task 6: Session→User Binding
-**Goal:** Link sessions to users after authentication.
-**Depends on:** Tasks 2, 5
-**Deliverables:**
-- Update `core/session.py` to include `user: User | None` field
-- Auth plugin sets `session.user` on successful login
-- Core checks `session.user is not None` for authenticated access
-**Test:** Verify session.user is set after login, None before.
+### Task 1: Event Bus (core/events.py)
+**Deliverables:** `EventBus` with `emit/on/once/off`, async handlers, lifecycle events `session:connect`, `session:disconnect`, `user:login`, `user:logout`, `menu:open`, `menu:select`, `command:pre`, `command:post`.
 
-## Build Order
-1. Event Bus (standalone)
-2. User Model (standalone)
-3. Plugin Base Class (standalone)
-4. Plugin Loader (depends on base class)
-5. Auth Plugin (depends on all above)
-6. Session Binding (depends on user model + auth)
+### Task 2: User Model (core/user.py)
+**Deliverables:** `User` dataclass + `UserManager` (get/create/update/delete/list), `users/` JSON store, `in_group()` / `can_access()` , bcrypt.
+
+### Task 3: Plugin Base Class (plugins/base.py)
+**Deliverables:** `Plugin` base with `name, version, description, menu_label, menu_key, menu_order, menu_requires` + lifecycle `on_load/on_unload/on_session_start/on_session_end/handle_command`.
+
+### Task 4: Plugin Loader (core/loader.py)
+**Deliverables:** `PluginLoader` scans `plugins/*/__init__.py`, calls `on_load(bbs)`, graceful skip of broken plugins.
+
+### Task 5: Auth Plugin (plugins/login/)
+**Deliverables:** Login/registration/TOTP, `ScreenLoader` via `core/screens.py`, `Terminal` I/O, emits `user:login`, `auth:login_failed`.
+
+### Task 6: Session→User Binding
+**Deliverables:** `Session.user: User|None`, auth plugin sets on login, core checks `session.authenticated`.
+
+---
+
+## Phase 1 — Tabbed PIM Home (Planned)
+
+### 1. Goal
+
+Replace the single-page `[M][F][B][C][D][I][Q]` menu with a **tabbed, branch-style PIM home** that feels like one surface — not teleporting between plugins. The user's sketch is the north star (caps = active in plain-ASCII fallback; ANSI adds colors + box-drawing):
+
+```
+Page one stuff      |     PAGE 2 (DMs)    |    Page 3 Stuff
+------------------------------------------------------------------------------
++-----------------------/        up/dn select      \---------------------+
+|  @nox (3m ago): lol                                                        |
+|  @danny (5d ago): How ya doin?                                 |
+|  @dave (3mo ago): souds good, I'd like to see it.     |
++--------------------------------------------------------------------------+
+```
+
+Top tabs = branches of the same interface. Middle pane = filtered conversation list (`@user (time): preview`), `up`/`dn` + `Enter` to open. Same `conversations` engine behind every tab; UI respects tempo (slow boards vs fast streams vs DMs).
+
+Modern-first principle: Modulo differentiates from Synchronet/WWIV/RBBS by treating **every interaction as a persistent, searchable conversation with a tempo control** — not "messages vs chat" as separate silos.
+
+### 2. Current Context & Assumptions
+
+- BBS is healthy on `15bd54c`: `bido`? telnet 6400 / SSH 6422 / API 8080, 246 tests, `core/screens.py` service (`bbs.screens.render/send`, `.ans→.asc→.txt` resolution, CRLF canonical, tokens `{bbsname}/{time}/{node}/{active}` etc., file beats generator, `/screen` toggle persisted in `preferences.screen_mode`, `/help` via `core/slash.py`), `core/app.py` 79-col pad + `row(h)`-pinned `>` prompt, `core/ops.py` One-API registry (20 ops, plane isolation), `plugins/messageboard` + `chat` + `files` + `bulletins` + `doors` + `api` + `sysop`.
+- Live override `plugins/mainmenu/screens/main.asc` = 3 lines (`This is a dummy menu…` + blank + `/screen to change modes.`) — committed as valid override.
+- Input is `read_key` (single-key hotkeys, no Enter) at `mainmenu` loop; `read_command` is the line-mode path. TAB/PGUP/PGDN/Ctrl-C/ESC are banned per KISS rule; keep `LEFT/RIGHT` or `1/2/3` for tabs.
+- Board is moderate-low speculation budget (hindsight budget mid), so reuse existing `bbs.storage.dir()` + `core/ops.py` rather than inventing new backends.
+- **Constraint:** plan lives here at `docs/build-plan.md`; `.hermes/plans/` is not the canonical location. Previous draft at `.hermes/plans/2026-08-24_190500-tabs-pim.md` was misplaced and will be removed.
+
+### 3. Architecture
+
+**One `conversations` engine, two lenses.**
+
+- **Store:** `core/conversations.py` owns `conversations/{id}/messages.jsonl` + `conversations/index.json`. Types: `board` (slow, group-gated, threaded), `channel` (fast, presence-typed), `dm` (private `participants=[2]`), `group` (private `participants=[n]`). Same `Message {id, conversation_id, parent_id?, author, body, created}` shape.
+- **API:** New ops in `core/opdefs.py`: `conversations.list`, `conversations.get`, `conversations.create`, `messages.list`, `messages.post`, `messages.delete`, `messages.find` (self-describing via `GET /api/v1/_schema` on both planes, same as `one-api.md`).
+- **Chrome vs pane:** `plugins/mainmenu` becomes the PIM chrome owner. It renders three bands every redraw: **A) top tab bar**, **B) pane border + pane content (delegated)**, **C) bottom prompt**. Content plugins stop owning their own screen layout — they render *into* the pane. The chrome does one `\x1b[2J\x1b[H` clear, pane never overprints stale rows alone.
+- **Graceful degradation:** if `session.terminal_type` is not ANSI-capable, tabs render as `PAGE 2 (DMs)` in caps with `|` separators; otherwise CP437 `─┌┐│└┘` + `ANSI.BRIGHT_WHITE`/`ANSI.BG_BLUE` + `{DIM}` per `shared/telnet_protocol.py`.
+- **Prefs:** `preferences.screen_mode == "generated"` still bypasses any file override; add `preferences.home_mode == "menu"|"pim"` for classic list vs PIM. File `plugins/mainmenu/screens/pim.asc` can reskin the chrome without code, same as `core/screens.py` contract.
+
+### 4. Step-by-Step Plan (bite-sized, TDD)
+
+#### Step 1: Move rail to canonical location (this commit)
+- **File:** `docs/build-plan.md` (this file) ← the only mutation this turn per plan-mode rules
+- **Validation:** `git status -sb` shows `M docs/build-plan.md`, no other `M`; `ls .hermes/plans/` still holds misplaced draft until next commit removes it.
+
+#### Step 2: Engine — `core/conversations.py` schema + storage
+- **Create:** `core/conversations.py` (Conversations service, `bbs.storage.dir("conversations")`, `asyncio.to_thread` I/O like `messageboard/boards.py`)
+- **Test:** `tests/test_conversations.py::test_create_board_persists` — failing first, then minimal pass
+- **Verify:** `pytest tests/test_conversations.py -v` → 1 passed
+
+#### Step 3: Engine — CRUD + threading + find
+- **Modify:** `core/conversations.py:40-180` (post/reply with `parent_id`, soft-delete tombstone, `find(query)` across `board_id`/`author`/`body`)
+- **Test:** `tests/test_conversations.py` (thread ordering, own-delete vs `moderator` delete via `user.can_access(["moderator"])`, `find` pagination to 3k-scale)
+- **Verify:** `pytest tests/test_conversations.py -q` green
+
+#### Step 4: One-API ops for conversations
+- **Modify:** `core/opdefs.py` (register 7 ops with `params` + `requires` + `planes`), `tests/test_ops.py` (plane-isolation invariant + parity)
+- **Verify:** `curl /api/v1/_schema | jq .conversations` lists ops on management plane only if gated; public plane omits them — test-enforced.
+
+#### Step 5: Migration shims (messageboard + chat → conversations)
+- **Modify:** `plugins/messageboard/__init__.py`, `plugins/chat/__init__.py` (thin wrappers over `bbs.conversations`); **Create:** `core/conversations.py::migrate_legacy()` idempotent
+- **Data:** `plugins/messageboard/data/<board_id>/*.json` → `kind=board` conversations; `chat` history → one `kind=channel` conversation titled `Lobby`
+- **Test:** `tests/test_conversations.py::test_legacy_messageboard_migrates`
+
+#### Step 6: Chrome — tab registry
+- **Create:** `plugins/mainmenu/tabs.py` (`TABS = [{id,label,kind,key,requires}]`, sysop override `plugins/mainmenu/data/tabs.json`, plugin-contributed `pim_tab = {...}` collected at `on_load`)
+- **Test:** `tests/test_pim_tabs.py` (ordering, `menu_requires` gating hides tab for non-members, `requires=[]` visible to all)
+
+#### Step 7: Chrome — three-band render (tabs / pane / prompt)
+- **Modify:** `plugins/mainmenu/__init__.py: _show_menu()` + `core/screens.py` helper `_render_chrome()` + new tokens `{unread}`/`{mentions}` backed by `bbs.conversations`
+- **Layout:** `render_tabs(active_id, session)` → 79-col padded line; `─` separator; `render_pane(active_tab)` delegates to `up/dn select` list box with ANSI fallback; bottom `>`: pinned at `\x1b[{h};1H\x1b[2K{BRIGHT_GREEN}> {RESET}` (already built, reuse)
+- **Test:** `tests/test_screens.py` snapshot: ANSI vs plain fallback chrome
+
+#### Step 8: Input routing for PIM
+- **Modify:** `plugins/mainmenu/__init__.py` (`PIMLoop`: `read_key` top-level, `LEFT/RIGHT` or `1/2/3` switch tab, `UP/DN` moves pane selection, `ENTER` opens full-screen reader, `/` → `core/slash.py`, `Q` → `bbs.disconnect`)
+- **Test:** `tests/test_pim_input.py` (key → active tab, wrap at ends, pane selection clamps, `/screen` still toggles inside PIM)
+
+#### Step 9: Full-screen reader/editor inside pane
+- **Modify:** `plugins/messageboard/__init__.py` (`BoardReader`: paged list, `F`ind via `messages.find`, threaded view with quoting, one-key reply, `D`elete with `can_access` check); **Create:** `core/screens.py` pane-border helper
+- **Editor:** classic BBS line editor `/S` save / `/A` abort inside pane, not full-ctrl — per prior decision
+- **Test:** Syncterm manual 80x24 lap + `tests/test_messageboard.py` ported
+
+#### Step 10: Prefs, file-override, and docs
+- **Modify:** `core/user.py` (new `preferences.home_mode`), `docs/screens.md` (PIM chrome tokens), `plugins/mainmenu/docs/README.md`, `docs/sysop-guide.md`, `docs/architecture.md` (menu diagram → PIM)
+- **Rule:** file beats generator: `plugins/mainmenu/screens/pim.asc` overrides chrome; deleting it falls back. Document reskin path.
+
+#### Step 11: Web console parity + E2E
+- **Modify:** `plugins/api/admin/app.js` + `index.html` (conversations pane mirrors terminal tabs, same `_schema`)
+- **Validation:** `pytest tests/ -q` → ~260+ ; manual Syncterm `localhost:6400` + `ssh -p 6422 localhost` (ANSI box-drawing, DM privacy only participants see, group-gated boards invisible, `/screen` toggle works inside PIM); `curl http://127.0.0.1:8080/api/v1/_schema` shows new ops
+
+### 5. Files Likely to Change
+
+- **New:** `core/conversations.py`, `plugins/mainmenu/tabs.py`, `tests/test_conversations.py`, `tests/test_pim_tabs.py`, `tests/test_pim_input.py`
+- **Modify:** `core/app.py` (wire `self.conversations`), `core/opdefs.py` (ops), `core/screens.py` (chrome helper + `{unread}/{mentions}`), `plugins/mainmenu/__init__.py` (become PIM), `plugins/messageboard/__init__.py` + `plugins/chat/__init__.py` (become pane consumers), `docs/screens.md`, `docs/sysop-guide.md`, `docs/architecture.md`, `docs/one-api.md`, `plugins/mainmenu/docs/README.md`
+- **Config:** `config.yaml` (optional `pim_tabs` order), `plugins/mainmenu/data/tabs.json` (sysop override)
+- **Legacy data:** `plugins/messageboard/data/` + `plugins/chat/data/` (read by migrator, then retired)
+
+### 6. Tests / Validation
+
+- **Unit:** CRUD/threading/permissions/find, tab ordering/gating, chrome snapshots (ANSI vs plain)
+- **Suite:** full `pytest tests/ -q --tb=line -p no:cacheprovider` must stay green each commit (246 at `15bd54c` baseline, expected to grow)
+- **Manual:** Syncterm `localhost:6400` + SSH `6422` for box-drawing, arrow-key nav, quote-reply, group gates, DM privacy, `/screen` inside PIM; API `_schema` on both planes
+- **Perf:** `_pad_line` to 79-col stays; `messages.find` is per-conversation jsonl + in-memory index at boot (same pattern as `boards.py`) — no 3k-row dump
+
+### 7. Risks, Tradeoffs, Open Questions
+
+- **Unified store vs just fixing boards:** unified costs a shim but avoids 3× plumbing for boards/chat/DMs. Risk: `find` across many DMs could be slow → per-conversation jsonl + boot index.
+- **ANSI mis-measure:** CP437 `┌`/`─` are single-width but could be miscounted by `_visible_len` if `core/app.py:_ANSI_RE` incomplete → verify with `shared/telnet_protocol.py:ANSI`.
+- **Empty PIM on first boot:** seed a `General` board conversation (existing `messageboard` default) so pane is never blank.
+- **Key clash:** `1/2/3` for tabs vs numeric board selection — reserve numbers for tabs in PIM; board selection inside pane uses `up/dn`+`enter` only in PIM mode.
+- **Open (Dave decides, not this plan):** initial tab set/order (Boards/DMs/Mentions are placeholders), whether Files/Bulletins/Doors get tabs or stay as `[F][B][D]` hotkeys, max tabs before 80-col wrap (cap at ~5 with truncation).
+
+### 8. Commit Discipline
+
+- One commit per step above; each commit message cites its section (`Build plan § Step N`); if a step diverges, the commit notes `diverged from § Step N: reason`.
+- Board health check each commit: `pytest tests/ -q` + `curl /api/v1/system.health | jq .status == "running"` before push.
+
+---
+*Teams: Coraline — don't wait for another bug to document synchronously. This rail is the history of design intent. After it lands, implementation proceeds via `subagent-driven-development` — one fresh subagent per step, two-stage review (spec compliance → code quality).*
