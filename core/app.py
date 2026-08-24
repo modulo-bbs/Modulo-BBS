@@ -80,6 +80,11 @@ class BBSApp:
         from core.screens import ScreenService
 
         self.screen_service = ScreenService(self)
+        # Unified conversations engine: boards + channels + DMs + group chats.
+        # One store, many tempos (see docs/build-plan.md Phase 1 / core/conversations.py).
+        from core.conversations import Conversations
+
+        self.conversations = Conversations(self)
         # Reference to the running transport server (telnet/SSH). Set when
         # the server is constructed so ``send`` can reuse its transport logic.
         self.server: Any = None
