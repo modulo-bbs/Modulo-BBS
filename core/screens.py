@@ -53,6 +53,17 @@ ANSI_TOKENS["CLEAR"] = ANSI.CLEAR_SCREEN
 ANSI_TOKENS["HOME"] = "\x1b[H"
 
 
+def _canonical_newlines(text: str) -> str:
+    """Normalise any line-ending style to CRLF (the wire convention).
+
+    Sysops author screens in whatever editor is at hand; a bare-LF file must
+    not staircase on Syncterm (LF moves down a row without returning to
+    column 0). \\r\\n -> \\n -> \\r\\n also un-breaks lone \\r files.
+    """
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text.replace("\n", "\r\n")
+
+
 @dataclass
 class TokenContext:
     """Everything a token provider may need for one render."""
@@ -241,9 +252,10 @@ class ScreenService:
             logger.warning("screen %s/%s unreadable", plugin, name)
             return None
         try:
-            return raw.decode(codec, errors="replace")
+            text = raw.decode(codec, errors="replace")
         except LookupError:
-            return raw.decode("utf-8", errors="replace")
+            text = raw.decode("utf-8", errors="replace")
+        return _canonical_newlines(text)
 
     # -- tokens -----------------------------------------------------------------
 

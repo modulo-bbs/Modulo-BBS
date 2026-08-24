@@ -83,8 +83,8 @@ class MainmenuPlugin(Plugin):
                 break
             if key == "/":
                 # Slash command: collect the rest of the line and hand it to
-                # the shared dispatcher (/screen, /help, …).
-                await self.bbs.send(session, "/")
+                # the shared dispatcher (/screen, /help, …). The "/" itself
+                # was already echoed by the input layer -- do NOT echo again.
                 from core.slash import handle_slash
 
                 rest = await runner.read_command(self.bbs, session)
