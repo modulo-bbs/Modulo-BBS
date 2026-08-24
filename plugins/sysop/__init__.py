@@ -162,7 +162,7 @@ class SysopPlugin(Plugin):
             )
             await self._pause(session)
             return
-        await self._show_result(session, result)
+        await self._show_result(session, result, op_name=op_name)
 
     async def _pause(self, session):
         """Hold output on screen until a key is pressed."""
@@ -211,7 +211,11 @@ class SysopPlugin(Plugin):
             lines.append(f"   {u['username']:<14} {','.join(u['groups'])}")
         await self.bbs.send(session, "\r\n".join(lines) + "\r\n")
 
-    async def _show_result(self, session, result):
+    async def _show_result(self, session, result, op_name=None):
+        if op_name == "users.list":
+            await self._show_users_table(session, result)
+            return
+
         import json as _json
 
         text = _json.dumps(result, indent=2, default=str)
@@ -224,6 +228,58 @@ class SysopPlugin(Plugin):
             out_lines.append(ln)
         await self.bbs.send(session, "\r\n" + "\r\n".join(out_lines) + "\r\n")
         await self._pause(session)
+
+    async def _show_users_table(self, session, result):
+        """Human table for users.list with pagination (N=next, P=prev, Q=quit)."""
+        W, C, R = ANSI.BRIGHT_WHITE, ANSI.BRIGHT_CYAN, ANSI.RESET
+        page = result["page"]
+        pages = result["pages"]
+        total = result["total"]
+
+        while True:
+            lines = [
+                "",
+                C + f" Accounts: {total} total"
+                + (f"  [page {page}/{pages}]" if pages > 1 else "")
+                + R,
+                " " + "-" * 56,
+                W + f" {'USERNAME':<16}{'GROUPS':<22}{'LAST LOGIN':<18}" + R,
+                " " + "-" * 56,
+            ]
+            for u in result["users"]:
+                groups = ",".join(u["groups"])[:20]
+                last = (u["last_login"] or "-")[:16].replace("T", " ")
+                lines.append(f" {u['username']:<16}{groups:<22}{last:<18}")
+            lines.append(" " + "-" * 56)
+            nav = []
+            if page < pages:
+                nav.append("N=Next")
+            if page > 1:
+                nav.append("P=Prev")
+            nav.append("Q=Done")
+            lines.append(" " + "  ".join(nav))
+            await self.bbs.send(session, "\r\n".join(lines) + "\r\n")
+
+            key = await runner.read_key(self.bbs, session)
+            if key is None or key == "Q":
+                return
+            if key == "N" and page < pages:
+                page += 1
+            elif key == "P" and page > 1:
+                page -= 1
+            else:
+                continue
+            try:
+                result = await registry.call(
+                    self.bbs, session.user, "users.list",
+                    {"page": page, "per_page": result["per_page"]},
+                )
+                page, pages, total = (
+                    result["page"], result["pages"], result["total"]
+                )
+            except Exception as e:  # noqa: BLE001
+                await self.bbs.send(session, f"\r\n! {e}\r\n")
+                return
 
 
 __all__ = ["SysopPlugin"]

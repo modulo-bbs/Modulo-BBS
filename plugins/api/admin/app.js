@@ -9,6 +9,8 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 let token = sessionStorage.getItem("modulo-token") || "";
 let me = null;
 let pollTimer = null;
+let usersPage = 1;
+const usersPerPage = 25;
 
 // ---------------------------------------------------------------- api
 class ApiError extends Error {
@@ -155,15 +157,20 @@ async function refreshUsers() {
   const body = $("#users-body");
   const filter = ($("#user-filter").value || "").toLowerCase();
   try {
-    const r = await api("users.list");
-    const users = r.users.filter(
+    const r = await api("users.list", { page: usersPage, per_page: usersPerPage });
+    const all = r.users.filter(
       (u) => !filter || u.username.includes(filter) || (u.display_name || "").toLowerCase().includes(filter)
     );
-    if (!users.length) {
+    $("#users-count").textContent =
+      `${r.total} account${r.total === 1 ? "" : "s"}` +
+      (r.pages > 1 ? ` · page ${r.page}/${r.pages}` : "");
+    $("#users-prev").disabled = r.page <= 1;
+    $("#users-next").disabled = r.page >= r.pages;
+    if (!all.length) {
       body.innerHTML = `<tr><td colspan="6" class="muted">No users match.</td></tr>`;
       return;
     }
-    body.innerHTML = users
+    body.innerHTML = all
       .map(
         (u) => `<tr>
           <td><strong>${esc(u.username)}</strong></td>
@@ -213,7 +220,9 @@ $("#users-body").addEventListener("click", (ev) => {
     }
   }
 });
-$("#user-filter").addEventListener("input", refreshUsers);
+$("#user-filter").addEventListener("input", () => { usersPage = 1; refreshUsers(); });
+$("#users-prev").addEventListener("click", () => { if (usersPage > 1) { usersPage--; refreshUsers(); } });
+$("#users-next").addEventListener("click", () => { usersPage++; refreshUsers(); });
 
 $("#user-form").addEventListener("submit", async (ev) => {
   if (ev.submitter?.value !== "save") return;

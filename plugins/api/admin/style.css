@@ -149,3 +149,11 @@ dialog menu { display: flex; gap: 8px; justify-content: flex-end; padding: 0; ma
 }
 #op-list .op-name { color: var(--accent); min-width: 220px; }
 #op-list button { padding: 2px 10px; font-size: 12px; margin-left: auto; }
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 12px;
+  gap: 8px;
+}

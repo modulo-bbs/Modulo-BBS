@@ -53,13 +53,20 @@
     <!-- Users -->
     <section id="tab-users" class="hidden">
       <div class="toolbar">
-        <input id="user-filter" type="search" placeholder="Filter users…">
+        <input id="user-filter" type="search" placeholder="Filter this page…">
         <button id="user-new" class="primary">+ New user</button>
       </div>
-      <div class="card"><table id="users-table">
+      <div class="card">
+        <table id="users-table">
         <thead><tr><th>Username</th><th>Display name</th><th>Groups</th><th>Created</th><th>Last login</th><th></th></tr></thead>
         <tbody id="users-body"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
-      </table></div>
+      </table>
+        <div class="pager">
+          <button id="users-prev">← Prev</button>
+          <span id="users-count" class="muted"></span>
+          <button id="users-next">Next →</button>
+        </div>
+      </div>
 
       <dialog id="user-dialog" class="card">
         <form method="dialog" id="user-form">

@@ -144,13 +144,28 @@ registry.register(
 # ---------------------------------------------------------------------------
 
 async def _users_list(bbs, user, params):
+    """Paged, sorted account list.
+
+    page starts at 1; per_page caps at 200 so one call can never dump
+    thousands of accounts at any surface.
+    """
     users = await bbs.users.list()
-    return {"users": [_public_user(u) for u in users]}
+    per_page = min(params["per_page"], 200)
+    start = (params["page"] - 1) * per_page
+    slice_ = users[start:start + per_page]
+    return {
+        "total": len(users),
+        "page": params["page"],
+        "per_page": per_page,
+        "pages": max(1, -(-len(users) // per_page)),
+        "users": [_public_user(u) for u in slice_],
+    }
 
 
 registry.register(
     "users.list",
-    description="All accounts (sanitized — never includes password hashes).",
+    description="Accounts, paged & sorted (sanitized — no password hashes).",
+    optional={"page": (int, 1), "per_page": (int, 50)},
     requires=[SYSOP_GROUP],
     handler=_users_list,
 )
