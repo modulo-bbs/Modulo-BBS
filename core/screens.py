@@ -195,14 +195,27 @@ class ScreenService:
             text = gen()
         return self.substitute(text, session, **extra)
 
+    def _prefers_generated(self, session) -> bool:
+        """True when the caller's saved preference asks for machine view."""
+        user = getattr(session, "user", None)
+        prefs = getattr(user, "preferences", None) or {}
+        return prefs.get("screen_mode") == "generated"
+
     def render(self, session, plugin: str, name: str, **extra: object) -> str:
         """Render screen ``name`` of ``plugin`` for ``session``.
 
-        File beats generator; missing both returns a visible placeholder so a
-        broken reskin is obvious rather than silent. ``**extra`` are ad-hoc
-        tokens for this call only (highest precedence).
+        File beats generator — unless the caller has toggled
+        ``/screen`` (``preferences["screen_mode"] == "generated"``), which
+        skips sysop skins entirely and always serves the generated,
+        permission-filtered fallback. Missing both returns a visible
+        placeholder so a broken reskin is obvious rather than silent.
+        ``**extra`` are ad-hoc tokens for this call only (highest precedence).
         """
-        text = self._load(session, plugin, name)
+        text = (
+            None
+            if self._prefers_generated(session)
+            else self._load(session, plugin, name)
+        )
         if text is None:
             gen = self._generators.get((plugin, name))
             if gen is not None:

@@ -37,6 +37,18 @@ def make_session():
     return s
 
 
+async def _real_user(app, username="tester", groups=("sysop",), **extra):
+    """Create + return a real persisted user so users.update() works."""
+    await app.users.create(username, password="pw-test-123")
+    if groups != ("user",) or extra:
+        await app.users.update(
+            username,
+            groups=list(groups),
+            **{"preferences": extra.pop("preferences")} if "preferences" in extra else {},
+        )
+    return await app.users.get(username)
+
+
 def run(coro):
     return asyncio.run(coro)
 
@@ -46,20 +58,53 @@ def text_of(session) -> str:
 
 
 class TestScreenCommand:
-    def test_screen_shows_generated_menu(self, app):
+    def test_screen_oneshot_shows_generated(self, app):
         app.screens.register_generator("mainmenu", "main", lambda session=None: "MENU BODY")
         s = make_session()
-        run(app.screens and None or asyncio.sleep(0))  # noop to settle loop style
 
         from core.slash import handle_slash
 
         async def scenario():
-            await handle_slash(app, s, "/screen")
+            await handle_slash(app, s, "/screen mainmenu main")
 
         run(scenario())
         out = text_of(s)
         assert "MENU BODY" in out
         assert "generated defaults" in out
+
+    def test_toggle_persists_and_bypasses_override(self, app, tmp_path):
+        """/screen flips the preference; render() then serves generated."""
+        d = tmp_path / "plugins" / "mainmenu" / "screens"
+        d.mkdir(parents=True)
+        (d / "main.txt").write_bytes(b"FANCY SKIN")
+
+        from plugins.mainmenu import MainmenuPlugin
+
+        MainmenuPlugin().on_load(app)
+
+        # File wins by default.
+        assert "FANCY SKIN" in app.screens.render(None, "mainmenu", "main")
+        assert "FANCY SKIN" in app.screens.render(None, "mainmenu", "main")
+
+        sysop = make_session()
+        sysop.user = run(_real_user(app, "tester", ["sysop"]))
+        run(_drive(app, sysop, "/screen"))  # toggle ON
+
+        out = text_of(sysop)
+        assert "Machine view ON" in out
+        # Now render() bypasses the file for this user.
+        rendered = app.screens.render(sysop, "mainmenu", "main")
+        assert "FANCY SKIN" not in rendered
+        assert "Main Menu" in rendered
+
+        # Toggle OFF -> skin returns.
+        sysop2 = make_session()
+        sysop2.user = run(
+            _real_user(app, "tester2", ["sysop"], preferences={"screen_mode": "generated"})
+        )
+        run(_drive(app, sysop2, "/screen"))
+        assert "Machine view OFF" in text_of(sysop2)
+        assert "FANCY SKIN" in app.screens.render(sysop2, "mainmenu", "main")
 
     def test_screen_filters_by_permission(self, app, tmp_path):
         """Sysop sees [X]; regular user does not."""
@@ -69,13 +114,13 @@ class TestScreenCommand:
         plugin.on_load(app)
 
         sysop = make_session()
-        sysop.user = _user_with(["sysop"])
-        run(_drive(app, sysop, "/screen"))
+        sysop.user = run(_real_user(app, "tester3", ["sysop"]))
+        run(_drive(app, sysop, "/screen mainmenu main"))
         assert "[X] Shutdown" in text_of(sysop)
 
         pleb = make_session()
-        pleb.user = _user_with(["user"])
-        run(_drive(app, pleb, "/screen"))
+        pleb.user = run(_real_user(app, "pleb", ["user"]))
+        run(_drive(app, pleb, "/screen mainmenu main"))
         assert "[X] Shutdown" not in text_of(pleb)
 
     def test_screen_beats_file_override(self, app, tmp_path):
@@ -131,7 +176,7 @@ async def _drive(app, session, line):
     await handle_slash(app, session, line)
 
 
-def _user_with(groups):
+def _user_with(groups, preferences=None):
     from core.user import User
 
-    return User(username="t", groups=groups)
+    return User(username="t", groups=groups, preferences=preferences or {})

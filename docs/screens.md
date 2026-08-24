@@ -70,20 +70,21 @@ whatever commands you like; the dispatcher decides what each caller may
 actually do, and unauthorized keys are rejected no matter what the screen
 displayed.
 
-## /screen — the machine's view
+## /screen — machine view, a saved preference
 
 Because a reskin can hide the real commands, every line-mode input loop
 supports the **`/screen`** command (recommended plugin convention):
 
-- `/screen` — show all generated default screens, filtered to *your*
-  permissions (sysops see `[X] Shutdown`, regular users don't)
-- `/screen mainmenu` — one plugin's screens
-- `/screen mainmenu main` — exactly one
+- `/screen` — **toggle** machine view. When ON, *all* screens render as
+  generated defaults (permission-filtered), skipping sysop skins entirely.
+  The choice is saved in your user preferences and persists across logins.
+- `/screen <plugin> [name]` — one-shot peek at a generated screen without
+  toggling.
+- `/help` — lists registered slash commands; plugins add their own via
+  `core.slash.register`.
 
-This bypasses file overrides entirely — it always renders the generated
-fallback. A sysop on an artsy menu is one keystroke from the honest
-command surface. `/help` lists registered slash commands; plugins add
-their own via `core.slash.register`.
+Machine view is the sysop's work mode: artsy menus for visitors, honest
+menus for you, one keystroke to flip.
 
 Single-key menus accept a leading `/` too: pressing `/` switches that keypress
 into a line read for the command.
