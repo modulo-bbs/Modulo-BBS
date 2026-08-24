@@ -34,9 +34,20 @@ ssh -p 6422 localhost
 
 ### Stopping the Server
 
-Press `Ctrl+C` or:
+Any of these performs a **graceful** shutdown (connected users get a goodbye
+notice before their connections close):
+
+- `Ctrl+C` in the server's terminal (SIGINT)
+- `kill <pid>` (SIGTERM — the default; never needed: `-9`)
+- If the HTTP API is enabled (`api.enabled: true` in config.yaml):
+  `curl -X POST http://127.0.0.1:8080/api/shutdown`
+
+A sysop logged into the board can also use the `[X] Shutdown` main-menu option
+(Y/N confirmation required).
+
+Finding the PID:
 ```bash
-kill $(lsof -t -i:6400) $(lsof -t -i:6422)
+ss -tlnp | grep -E ':(6400|6422)'
 ```
 
 ## User Management
@@ -81,30 +92,60 @@ Passwords are bcrypt-hashed. Minimum 6 characters. The server never stores plain
 
 ## Plugin Management
 
-### Enabling/Disabling Plugins
+### Loading
 
-Edit `config.yaml`:
+Plugins are discovered automatically: the loader scans `plugins/*/` and loads
+every `__init__.py` that exports a `Plugin` subclass. A plugin that fails to
+import or raises during load is logged and skipped — one broken plugin never
+prevents startup. There is no `plugins.enabled` list; to remove a plugin from
+the board, remove its directory (or move it out of `plugins/`). Restart the
+server after changes.
+
+### HTTP Control API (shipped)
+
+Enabled in `config.yaml`:
+
 ```yaml
-plugins:
-  enabled:
-    - messageboard    # ✓ active
-    - files           # ✓ active
-    - bulletin        # ✓ active
-    # - chat          # ✗ disabled
+api:
+  enabled: true        # off by default
+  host: "127.0.0.1"    # keep loopback unless you need LAN access
+  port: 8080
+  # keys:              # optional X-API-Key allowlist; empty = open (dev mode)
+  #   - name: "admin"
+  #     key: "replace-with-a-real-secret"
 ```
 
-Restart the server after changes.
+Endpoints (stdlib-only implementation, no frameworks):
+
+```
+GET  /api/health      → status, node counts, loaded plugins
+GET  /api/sessions    → active sessions
+POST /api/shutdown    → graceful shutdown, optional {"message": "..."}
+POST /api/broadcast   → send a line to every connected user
+```
+
+This is the interim control surface. The full sysop management API — users,
+plugin configuration, audit — is specified in `docs/one-api.md` (the One-API
+principle) and not yet implemented.
 
 ### Plugin Directory
 
-Each plugin lives in `plugins/<name>/`:
+Each plugin is self-contained in `plugins/<name>/`:
 ```
 plugins/
-├── base.py           # Plugin interface
+├── base.py           # Plugin interface (not a plugin itself)
+├── login/
+│   ├── __init__.py   # plugin class + flow wiring
+│   ├── login.py      # LoginFlow
+│   ├── registration.py
+│   ├── totp.py       # TOTPManager/TOTPFlow (optional 2FA)
+│   ├── screens/      # display templates (CRLF, ASCII-safe)
+│   └── data/         # runtime data (totp_secrets.json)
 ├── messageboard/
-│   ├── __init__.py   # Plugin class
-│   ├── models.py     # Data models
-│   └── ui.py         # Menu/rendering
+│   ├── __init__.py
+│   ├── boards.py     # BoardStore CRUD
+│   ├── screens/
+│   └── data/         # boards.json, <board_id>/*.json messages
 └── ...
 ```
 
@@ -182,10 +223,10 @@ Increase `--nodes` or disconnect idle users. Check logs for which nodes are occu
 ### Plugin not loading
 
 Check:
-1. Plugin directory exists under `plugins/`
-2. `__init__.py` exports a `Plugin` subclass
-3. Plugin is listed in `config.yaml` under `plugins.enabled`
-4. No import errors in logs
+1. Plugin directory exists under `plugins/` with an `__init__.py`
+2. That file exports a `Plugin` subclass
+3. No import errors in the startup log (broken plugins are skipped with a
+   logged reason, not fatal)
 
 ## Security Notes
 

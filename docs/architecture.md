@@ -16,28 +16,39 @@ Modulo is a modular, plugin-based Bulletin Board System built in Python 3.11+ wi
 
 ```
 modulo-bbs/
-├── core/                    # Session, user model, event bus, transport
+├── core/                    # Infrastructure (non-negotiable core)
+│   ├── app.py               # BBSApp: shared application object
+│   ├── runner.py            # read_command/read_key, plugin flow, bootstrap
 │   ├── session.py           # Session state machine + node tracking
-│   ├── user.py              # User model + CRUD
+│   ├── user.py              # User model + CRUD (users/ storage)
 │   ├── events.py            # Event bus
-│   └── transport/           # Telnet + SSH implementations
-│       ├── telnet.py
-│       └── ssh.py
+│   ├── keys.py              # Plugin keybinding loader (plugins/<name>/keys)
+│   ├── loader.py            # Plugin discovery + loading
+│   └── storage.py           # PluginStorage: bbs.storage.dir(name)
 ├── plugins/                 # All plugins (self-contained)
-│   ├── base.py              # Plugin interface
-│   ├── auth/                # Authentication (login, register)
-│   ├── messageboard/        # Message boards + threads
-│   ├── files/               # File areas + transfers
-│   ├── bulletin/            # System bulletins + news
+│   ├── base.py              # Plugin interface (not a plugin itself)
+│   ├── login/               # Auth flows: login, registration, TOTP
+│   ├── logon/               # Logon sequencer (config-driven steps)
+│   ├── mainmenu/            # Main menu (renders from plugin metadata)
+│   ├── messageboard/        # Multi-board message base + threads
+│   ├── files/               # File area catalog (transfers: future)
+│   ├── bulletins/           # Sysop notices, new-since-last-call at logon
 │   ├── chat/                # Inter-node live chat
-│   └── doors/               # Door game loader
-├── shared/                  # Shared utilities
-│   ├── telnet_protocol.py   # RFC 854/855, ANSI codes
-│   └── blockletters.py      # ASCII art renderer
+│   ├── doors/               # Door game catalog (launching: future)
+│   └── api/                 # HTTP control API (health/sessions/shutdown/broadcast)
+├── server/                  # Transports + session plumbing
+│   ├── server.py            # Telnet server
+│   ├── ssh_server.py        # SSH server (asyncssh)
+│   └── session.py           # Session/SessionManager
+├── shared/
+│   ├── telnet_protocol.py   # RFC 854/855 negotiator, ANSI codes
+│   └── blockletters.py      # '#' block-letter banner renderer
+├── tests/                   # pytest suite (one file per module/plugin)
 ├── tools/                   # Dev + ops tools
 ├── docs/                    # Documentation
 ├── keys/                    # SSH host keys (gitignored)
-├── users/                   # User data (core-owned)
+├── users/                   # User data (core-owned, one JSON per account)
+├── client/                  # Dev/test terminal client
 ├── run_server.py            # Entry point
 ├── config.yaml              # Server configuration
 ├── LICENSE                  # Apache 2.0
@@ -60,19 +71,23 @@ Manages connected users. Each connection gets a `Session` object that tracks:
 
 Sessions are protocol-agnostic — telnet and SSH both create Session objects.
 
-### Menu System (`core/menu.py`)
+### Menu System (`plugins/mainmenu/`)
 
-Hierarchical menu navigation. Each menu level is a list of `(key, label, handler)` tuples. Plugins register their menu items at load time.
+There is no core menu module — the menu is just another plugin. The mainmenu
+plugin iterates `bbs.plugins`, sorts by `menu_order`, and renders each plugin's
+self-declared `menu_label` / `menu_key`. Swapping in a different menu plugin
+changes nothing else. Current board shape:
 
 ```
 Main Menu
-├── [M] Message Board    → plugin: messageboard
+├── [M] Message Boards   → plugin: messageboard   (menu_order 10)
 ├── [F] Files            → plugin: files
-├── [B] Bulletins        → plugin: bulletin
+├── [B] Bulletins        → plugin: bulletins
 ├── [C] Chat             → plugin: chat
-├── [U] User Profile     → plugin: usermgmt
-├── [I] System Info      → built-in
-└── [Q] Disconnect       → built-in
+├── [D] Doors            → plugin: doors
+├── [I] System Info      → built into mainmenu
+├── [X] Shutdown         → built into mainmenu (sysop group only, Y/N confirm)
+└── [Q] Disconnect       → built into mainmenu
 ```
 
 ### Event Bus (`core/events.py`)
@@ -89,15 +104,19 @@ bbs.events.on("chat:message", handle_chat_message)
 
 Events are async — handlers run in the event loop.
 
-### Transport Layer (`core/transport/`)
+### Transport Layer (`server/`)
 
 Implements network protocols. Each transport:
 1. Accepts connections
 2. Performs protocol negotiation (telnet IAC / SSH handshake)
-3. Creates a Session object
-4. Bridges I/O between the network and the session
+3. Creates a Session object via the shared SessionManager
+4. Hands the session to the core bootstrap hook (`core.runner.run_bootstrap`),
+   which invokes the configured logon plugin — identical flow for every
+   transport
 
-Adding a new transport (e.g., WebSocket) means implementing this interface.
+Telnet lives in `server/server.py`, SSH in `server/ssh_server.py` (asyncssh).
+Adding a new transport means writing another listener that calls the same
+bootstrap hook.
 
 ## Plugin System
 
@@ -177,19 +196,24 @@ Plugins interact with the core via the `bbs` object:
 
 ### External HTTP API
 
-REST + WebSocket API for web frontends, mobile apps, CLI tools.
+**Adopted design: `docs/one-api.md` (the One-API Principle).** One canonical
+operations registry; two exposure planes (management = loopback-only sysop ops,
+public = user ops behind a TLS proxy); versioned `/api/v1/` paths with a
+self-describing `_schema`; authentication by user account including bot
+accounts for machine clients — group gates are the only authorization, there
+are no scoped API keys.
+
+Interim shipped endpoints (until the registry is implemented):
 
 ```
-GET  /api/health              → Server status
-GET  /api/sessions            → Active sessions
-POST /api/auth/login          → Authenticate
-GET  /api/messages            → Read messages
-POST /api/messages            → Post message
-GET  /api/files               → List files
-WS   /ws/chat                 → Real-time chat
+GET  /api/health      → Server status
+GET  /api/sessions    → Active sessions
+POST /api/shutdown    → Graceful shutdown
+POST /api/broadcast   → Message every connected user
 ```
 
-API authentication via API keys (not session passwords).
+Auth: optional `X-API-Key` allowlist from config (`api.keys`); empty list =
+open, intended for loopback/dev use.
 
 ## Data Model
 
@@ -227,31 +251,33 @@ API authentication via API keys (not session passwords).
 
 ## Configuration
 
-`config.yaml` — server settings, plugin options, API keys.
+`config.yaml` — server settings, plugin options. The shipped schema (CLI flags
+`--host --port --ssh-port --nodes --plain --ssh` override these values):
 
 ```yaml
 server:
-  host: "0.0.0.0"
+  host: "127.0.0.1"
   telnet_port: 6400
-  ssh_port: 6422
+  ssh_port: 6422       # SSH enabled by --ssh or --ssh-port flag
   max_nodes: 8
-  
-auth:
-  method: "local"  # local, ldap, oauth
-  
-plugins:
-  enabled:
-    - messageboard
-    - files
-    - bulletin
-    - chat
-    - usermgmt
-  
-api:
-  enabled: true
+
+logon_plugin: logon
+
+logon_sequence:
+  - screen:splash.txt
+  - plugin:login
+  - screen:welcome.txt
+  - plugin:bulletins
+  - plugin:mainmenu
+
+api:                   # HTTP control API, off by default
+  enabled: false
+  host: "127.0.0.1"
   port: 8080
-  keys:
-    - name: "web-frontend"
-      key: "..."
-      permissions: ["read", "write"]
+  # keys:
+  #   - name: "admin"
+  #     key: "replace-with-a-real-secret"
 ```
+
+There is no `plugins.enabled` list — the loader auto-discovers every
+`plugins/<name>/__init__.py`.

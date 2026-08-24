@@ -421,43 +421,57 @@ a `quit: X` default is wrong and will be judged harshly.
 defaults)` and read the result; disabled commands simply don't appear, and
 the plugin's input loop treats those keys as unknown input.
 
-## HTTP API (Future)
+## HTTP API
 
-REST + WebSocket API for web frontends, mobile apps, CLI tools.
+**Adopted design: see `docs/one-api.md` (the One-API Principle).** Summary of
+what is decided; that document is authoritative:
 
-```
-GET  /api/health              → Server status
-GET  /api/sessions            → Active sessions
-POST /api/auth/login          → Authenticate
-GET  /api/messages            → Read messages
-POST /api/messages            → Post message
-GET  /api/files               → List files
-WS   /ws/chat                 → Real-time chat
-```
+- One canonical operations registry (`core/ops.py`, planned) — every capability
+  (sysop management *and* ordinary user actions like posting) is declared once
+  with params, permission groups, and exposure plane.
+- Two exposure planes off one dispatcher:
+  - **Management plane** — sysop ops, loopback-only listener, never proxied.
+  - **Public plane** — user ops, meant to sit behind a TLS reverse proxy.
+  - A sysop-gated operation can never appear on the public plane or its schema
+    (test-enforced invariant).
+- Versioned paths (`/api/v1/...`) and a self-describing `GET /api/v1/_schema`
+  per plane.
+- Authentication is by user account (bcrypt), including bot accounts for
+  machine clients with role-appropriate groups. There are no scoped API keys;
+  group gates are the only authorization mechanism.
 
-API authentication via API keys (not session passwords).
+Interim shipped endpoints (until the registry lands): `GET /api/health`,
+`GET /api/sessions`, `POST /api/shutdown`, `POST /api/broadcast` — see the
+SysOp Guide. These will migrate onto `/api/v1/` when the registry exists.
 
 ## Configuration
 
-`config.yaml` — server settings, plugin options.
+`config.yaml` — server settings, plugin options. The actual shipped schema:
 
 ```yaml
 server:
-  host: "0.0.0.0"
+  host: "127.0.0.1"    # bind address (CLI --host overrides)
   telnet_port: 6400
-  ssh_port: 6422
+  ssh_port: 6422       # SSH off unless --ssh / --ssh-port given
   max_nodes: 8
-  
-plugins:
-  enabled:
-    - login
-    - mainmenu
-    - messageboard
-    - files
-    - chat
-  
-storage:
-  backend: "json"  # json | sqlite (future)
+
+logon_plugin: logon     # which plugin orchestrates the logon flow
+
+logon_sequence:         # see "Logon Sequence" below
+  - screen:splash.txt
+  - plugin:login
+  - screen:welcome.txt
+  - plugin:bulletins
+  - plugin:mainmenu
+
+api:                    # HTTP control API (see SysOp Guide)
+  enabled: false
+  host: "127.0.0.1"
+  port: 8080
+
+# Plugins read their own sections from bbs.config, e.g. a plugin named
+# "messageboard" may look for config["messageboard"]. There is no global
+# plugins.enabled list — the loader auto-discovers plugins/ subdirectories.
 ```
 
 ## Logon Sequence (Sysop-Configurable)

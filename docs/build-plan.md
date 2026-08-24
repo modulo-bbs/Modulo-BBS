@@ -1,5 +1,11 @@
 # Modulo BBS — Plugin System Build Plan
 
+> **Status: COMPLETE.** All six original tasks shipped and tested (see
+> `docs/architecture.md` for what exists today). This file is retained as the
+> historical record of the foundation build. Current roadmap lives in
+> `docs/one-api.md` (One-API principle: ops registry → /api/v1 dispatch →
+> web dashboard + terminal sysop menu as first consumers).
+
 ## Task 1: Event Bus (core/events.py)
 **Goal:** Publish/subscribe system for inter-module communication.
 **Spec:** See `docs/plugin-spec.md` — Event Bus section.
