@@ -73,10 +73,16 @@ Sessions are protocol-agnostic — telnet and SSH both create Session objects.
 
 ### Menu System (`plugins/mainmenu/`)
 
-There is no core menu module — the menu is just another plugin. The mainmenu
-plugin iterates `bbs.plugins`, sorts by `menu_order`, and renders each plugin's
-self-declared `menu_label` / `menu_key`. Swapping in a different menu plugin
-changes nothing else. Current board shape:
+There is no core menu module — the menu is just another plugin. In classic
+`home_mode=menu` the mainmenu plugin iterates `bbs.plugins`, sorts by
+`menu_order`, and renders each plugin's `menu_label` / `menu_key`. In the
+default `home_mode=pim` (since 2026-08-24) it becomes the tabbed PIM home:
+top tabs (branches of one surface; see `plugins/mainmenu/tabs.py` +
+`docs/build-plan.md` Phase 1), middle pane (filtered `core/conversations.py`
+views — boards / DMs / Mentions), bottom `>` prompt. File `pim.*` beats the
+generated chrome; `preferences.home_mode` toggles classic vs PIM.
+
+Classic board shape (when `home_mode=menu`; PIM replaces the list with tabs):
 
 ```
 Main Menu
