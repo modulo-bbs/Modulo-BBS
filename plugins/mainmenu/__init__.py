@@ -119,8 +119,12 @@ class MainmenuPlugin(Plugin):
         screen = self.bbs.screens.render(session, self.name, "main")
         await self.bbs.send(session, screen)
 
-        # Erase any leftover lines from a previous longer render, then pin
-        # the green ``>`` prompt on the very last terminal line.
+        # Erase everything from the end of the content down to the last
+        # row — kills any leftover lines from /screen output, previous
+        # longer renders, or other mid-loop prints.
+        await self.bbs.send(session, "\x1b[J")
+
+        # Pin the green ``>`` prompt on the very last terminal line.
         G = ANSI.BRIGHT_GREEN
         R = ANSI.RESET
         await self.bbs.send(session, f"\x1b[{h};1H")   # last row
