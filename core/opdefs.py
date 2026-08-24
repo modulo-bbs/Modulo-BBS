@@ -501,3 +501,186 @@ registry.register(
     optional={"token": (str, "")},
     handler=_auth_logout,
 )
+
+
+# ---------------------------------------------------------------------------
+# Conversations — unified engine (boards + channels + DMs + groups)
+# See core/conversations.py + docs/build-plan.md Phase 1.
+# All ops are user-facing (both planes); permission is per-conversation
+# (group gates for boards, participant lists for DMs/groups), not per-op.
+# ---------------------------------------------------------------------------
+
+async def _conversations_list(bbs, user, params):
+    kind = params.get("kind") or None
+    if kind == "":
+        kind = None
+    convs = await bbs.conversations.list_conversations(kind=kind, visible_to=user)
+    # paging — same discipline as users.list (cap 200)
+    per_page = min(params["per_page"], 200)
+    page = params["page"]
+    start = (page - 1) * per_page
+    slice_ = convs[start : start + per_page]
+    return {
+        "total": len(convs),
+        "page": page,
+        "per_page": per_page,
+        "pages": max(1, -(-len(convs) // per_page)),
+        "conversations": slice_,
+    }
+
+
+async def _conversations_get(bbs, user, params):
+    conv = await bbs.conversations.get_conversation(params["conversation_id"])
+    if conv is None:
+        raise ValidationError(f"no such conversation: {params['conversation_id']}")
+    # visibility check (reuse list filter logic by checking single)
+    visible = await bbs.conversations.list_conversations(visible_to=user)
+    if not any(c["id"] == conv["id"] for c in visible):
+        raise PermissionDeniedError("not visible to you")
+    return conv
+
+
+async def _conversations_create(bbs, user, params):
+    if user is None:
+        raise PermissionDeniedError("login required to create conversations")
+    kind = params["kind"]
+    title = params["title"]
+    requires = _split_groups(params.get("requires") or "")
+    participants_raw = params.get("participants") or ""
+    participants = [p.strip() for p in participants_raw.split(",") if p.strip()]
+    # Boards are sysop-gated creation (moderated spaces); DMs/channels anyone
+    if kind == "board" and not user.can_access([SYSOP_GROUP]):
+        raise PermissionDeniedError("only sysop may create boards")
+    if kind in ("dm", "group") and not participants:
+        raise ValidationError("dm/group requires participants (comma-separated usernames)")
+    # For DMs/groups, auto-include creator if missing
+    if kind in ("dm", "group") and user.username not in participants:
+        participants = [user.username] + participants
+    conv = await bbs.conversations.create_conversation(
+        kind=kind,
+        title=title,
+        created_by=user.username,
+        requires=requires if kind == "board" else [],
+        participants=participants if kind in ("dm", "group") else [],
+    )
+    bbs.events.emit("conversations:create", {"conversation": conv, "by": user.username})
+    return conv
+
+
+async def _messages_list(bbs, user, params):
+    conv = await bbs.conversations.get_conversation(params["conversation_id"])
+    if conv is None:
+        raise ValidationError(f"no such conversation: {params['conversation_id']}")
+    visible = await bbs.conversations.list_conversations(visible_to=user)
+    if not any(c["id"] == conv["id"] for c in visible):
+        raise PermissionDeniedError("not visible to you")
+    msgs = await bbs.conversations.list_messages(params["conversation_id"])
+    # paging for large threads (same cap discipline)
+    per_page = min(params["per_page"], 200)
+    page = params["page"]
+    start = (page - 1) * per_page
+    slice_ = msgs[start : start + per_page]
+    return {
+        "conversation_id": params["conversation_id"],
+        "total": len(msgs),
+        "page": page,
+        "per_page": per_page,
+        "pages": max(1, -(-len(msgs) // per_page)),
+        "messages": slice_,
+    }
+
+
+async def _messages_post(bbs, user, params):
+    if user is None:
+        raise PermissionDeniedError("login required to post")
+    conv = await bbs.conversations.get_conversation(params["conversation_id"])
+    if conv is None:
+        raise ValidationError(f"no such conversation: {params['conversation_id']}")
+    visible = await bbs.conversations.list_conversations(visible_to=user)
+    if not any(c["id"] == conv["id"] for c in visible):
+        raise PermissionDeniedError("not visible to you")
+    parent_id = params.get("parent_id")
+    if parent_id == 0:
+        parent_id = None
+    msg = await bbs.conversations.post_message(
+        params["conversation_id"], author=user.username, body=params["body"], parent_id=parent_id
+    )
+    bbs.events.emit("conversations:post", {"conversation_id": params["conversation_id"], "msg": msg})
+    return msg
+
+
+async def _messages_delete(bbs, user, params):
+    if user is None:
+        raise PermissionDeniedError("login required")
+    conv = await bbs.conversations.get_conversation(params["conversation_id"])
+    if conv is None:
+        raise ValidationError(f"no such conversation: {params['conversation_id']}")
+    visible = await bbs.conversations.list_conversations(visible_to=user)
+    if not any(c["id"] == conv["id"] for c in visible):
+        raise PermissionDeniedError("not visible to you")
+    ok = await bbs.conversations.delete_message(params["conversation_id"], params["id"], by_user=user)
+    if not ok:
+        raise ValidationError(f"no such message #{params['id']}")
+    bbs.events.emit("conversations:delete", {"conversation_id": params["conversation_id"], "id": params["id"], "by": user.username})
+    return {"deleted": params["id"]}
+
+
+async def _messages_find(bbs, user, params):
+    q = params["query"]
+    kind = params.get("kind") or None
+    if kind == "":
+        kind = None
+    # find respects visibility implicitly via list_conversations filter inside Conversations.find_messages?
+    # Instead filter post-search to visible conversations.
+    hits = await bbs.conversations.find_messages(q, kind=kind, limit=params["limit"])
+    visible_ids = {c["id"] for c in await bbs.conversations.list_conversations(visible_to=user)}
+    hits = [h for h in hits if h.get("conversation_id") in visible_ids]
+    return {"query": q, "hits": hits, "count": len(hits)}
+
+
+registry.register(
+    "conversations.list",
+    description="Conversations visible to caller (boards/channels/DMs), paged. kind filter optional.",
+    optional={"kind": (str, ""), "page": (int, 1), "per_page": (int, 50)},
+    handler=_conversations_list,
+)
+registry.register(
+    "conversations.get",
+    description="One conversation by id (visibility-checked).",
+    params={"conversation_id": str},
+    handler=_conversations_get,
+)
+registry.register(
+    "conversations.create",
+    description="Create a conversation. kind=board|channel|dm|group. Boards are sysop-only; DMs need participants.",
+    params={"kind": str, "title": str},
+    optional={"requires": (str, ""), "participants": (str, "")},
+    handler=_conversations_create,
+)
+registry.register(
+    "messages.list",
+    description="Messages in one conversation, paged.",
+    params={"conversation_id": str},
+    optional={"page": (int, 1), "per_page": (int, 50)},
+    handler=_messages_list,
+)
+registry.register(
+    "messages.post",
+    description="Post a message (threaded via parent_id).",
+    params={"conversation_id": str, "body": str},
+    optional={"parent_id": (int, 0)},
+    handler=_messages_post,
+)
+registry.register(
+    "messages.delete",
+    description="Delete a message (own, or any as moderator/sysop).",
+    params={"conversation_id": str, "id": int},
+    handler=_messages_delete,
+)
+registry.register(
+    "messages.find",
+    description="Substring search across bodies+author, visibility-filtered.",
+    params={"query": str},
+    optional={"kind": (str, ""), "limit": (int, 25)},
+    handler=_messages_find,
+)

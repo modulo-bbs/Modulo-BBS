@@ -115,7 +115,17 @@ class Conversations:
         index = await asyncio.to_thread(self._read_index_sync)
         if kind is not None:
             index = [c for c in index if c.get("kind") == kind]
-        if visible_to is not None:
+        # Anonymous (visible_to is None) sees only public boards + public channels
+        if visible_to is None:
+            filtered = []
+            for c in index:
+                if c.get("kind") == "board" and (c.get("requires") or []):
+                    continue
+                if c.get("kind") in ("dm", "group"):
+                    continue
+                filtered.append(c)
+            index = filtered
+        else:
             # Group-gated boards only; channels/DMs use participant lists
             filtered = []
             for c in index:
