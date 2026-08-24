@@ -27,6 +27,7 @@ from typing import Any
 
 CONVERSATION_KINDS = {"board", "channel", "dm", "group"}
 CONVERSATIONS_INDEX = "index.json"
+READS_FILE = "reads.json"
 
 
 def _now_iso() -> str:
@@ -43,6 +44,7 @@ class Conversations:
         # lock for index mutations.
         self._locks: dict[str, asyncio.Lock] = {}
         self._index_lock = asyncio.Lock()
+        self._reads_lock = asyncio.Lock()
 
     def _root(self) -> Path:
         return self.bbs.storage.dir(self._storage_name)
@@ -102,6 +104,87 @@ class Conversations:
         mp = self._messages_path(conv_id)
         with mp.open("a", encoding="utf-8") as f:
             f.write(json.dumps(msg) + "\n")
+
+    def _reads_path_sync(self) -> Path:
+        return self._root() / READS_FILE
+
+    def _read_reads_sync(self) -> dict[str, dict[str, int]]:
+        p = self._reads_path_sync()
+        if not p.is_file():
+            return {}
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            # ensure values are dicts of int
+            out: dict[str, dict[str, int]] = {}
+            for u, mp in data.items():
+                if isinstance(mp, dict):
+                    out[u] = {str(k): int(v) for k, v in mp.items() if isinstance(v, int) or str(v).isdigit()}
+            return out
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def _write_reads_sync(self, data: dict[str, dict[str, int]]) -> None:
+        p = self._reads_path_sync()
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp.replace(p)
+
+    # -- read-state (per-user last_read) -------------------------------------
+
+    async def get_last_read(self, username: str, conv_id: str) -> int:
+        """Last read message id for user/conv (0 = never read)."""
+        if not username or not conv_id:
+            return 0
+        data = await asyncio.to_thread(self._read_reads_sync)
+        return int(data.get(username, {}).get(conv_id, 0))
+
+    async def set_last_read(self, username: str, conv_id: str, msg_id: int) -> None:
+        if not username or not conv_id:
+            return
+        async with self._reads_lock:
+            data = await asyncio.to_thread(self._read_reads_sync)
+            mp = data.get(username, {})
+            # only advance, never go backwards
+            if int(mp.get(conv_id, 0)) < int(msg_id):
+                mp[conv_id] = int(msg_id)
+                data[username] = mp
+                await asyncio.to_thread(self._write_reads_sync, data)
+
+    async def mark_read(self, username: str, conv_id: str) -> None:
+        """Mark conversation as fully read (to current max id)."""
+        msgs = await asyncio.to_thread(self._read_messages_sync, conv_id)
+        max_id = max((m.get("id", 0) for m in msgs), default=0)
+        if max_id:
+            await self.set_last_read(username, conv_id, max_id)
+        else:
+            # empty conv: mark as 0 so it doesn't count as new
+            await self.set_last_read(username, conv_id, 0)
+
+    async def unread_count(self, username: str, conv_id: str) -> int:
+        """How many messages in conv are unread for user."""
+        if not username:
+            return 0
+        last = await self.get_last_read(username, conv_id)
+        msgs = await asyncio.to_thread(self._read_messages_sync, conv_id)
+        return sum(1 for m in msgs if int(m.get("id", 0)) > last)
+
+    async def unread_conversations(self, username: str, *, kind: str | None = None, visible_to=None) -> list[dict[str, Any]]:
+        """Conversations visible to user that have unread messages (or never read)."""
+        convs = await self.list_conversations(kind=kind, visible_to=visible_to)
+        out = []
+        for c in convs:
+            # empty conversations are not "new"
+            if int(c.get("message_count", 0)) == 0:
+                continue
+            last = await self.get_last_read(username, c["id"])
+            # if never read (0) and has messages -> unread
+            if last == 0:
+                out.append(c)
+            else:
+                # check if last_message_at is newer than last read? we use unread_count
+                if await self.unread_count(username, c["id"]) > 0:
+                    out.append(c)
+        return out
 
     # -- public async API ---------------------------------------------------
 

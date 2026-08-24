@@ -209,13 +209,15 @@ class MainmenuPlugin(Plugin):
             # "Label: (N new) item | item | ..." elided to inner width 77.
             user = getattr(session, "user", None)
             digests: list[tuple[str, str]] = []  # (text, target_tab_id)
-            # DMs
+            # DMs — only those with unread messages (and at least one message)
             try:
-                dms = await self.bbs.conversations.list_conversations(kind="dm", visible_to=user)
+                if user is not None and getattr(user, "username", None):
+                    dms = await self.bbs.conversations.unread_conversations(user.username, kind="dm", visible_to=user)
+                else:
+                    dms = []
             except Exception:
                 dms = []
             if dms:
-                # other participants for each DM
                 names: list[str] = []
                 uname = getattr(user, "username", "") if user else ""
                 seen_names = set()
@@ -225,6 +227,7 @@ class MainmenuPlugin(Plugin):
                     if other not in seen_names:
                         names.append(str(other))
                         seen_names.add(other)
+                # elide names to fit
                 prefix = f"DMs: ({len(dms)} new) from "
                 text = _elided(prefix, names, sep=", ", width=74)
                 digests.append((text, "dms"))
@@ -270,9 +273,12 @@ class MainmenuPlugin(Plugin):
                         digests.append(("Files: (no new)", "files"))
             except Exception:
                 pass
-            # Boards
+            # Boards — only those with unread messages
             try:
-                boards = await self.bbs.conversations.list_conversations(kind="board", visible_to=user)
+                if user is not None and getattr(user, "username", None):
+                    boards = await self.bbs.conversations.unread_conversations(user.username, kind="board", visible_to=user)
+                else:
+                    boards = []
             except Exception:
                 boards = []
             if boards:
@@ -502,6 +508,13 @@ class MainmenuPlugin(Plugin):
         sel = getattr(session, "_pim_selected", 0)
         sel = max(0, min(sel, len(convs) - 1))
         conv = convs[sel]
+        # mark as read so Dashboard digest clears on return (quick-link)
+        try:
+            uname = getattr(getattr(session, "user", None), "username", None)
+            if uname:
+                await self.bbs.conversations.mark_read(uname, conv["id"])
+        except Exception:
+            pass
         page = 0
         per_page = max(5, getattr(session, "terminal_height", 24) - 8)
         while getattr(session, "is_active", True):
@@ -605,6 +618,10 @@ class MainmenuPlugin(Plugin):
                     continue
                 try:
                     await self.bbs.conversations.post_message(conv["id"], author=session.user.username, body=body, parent_id=parent_id)
+                    try:
+                        await self.bbs.conversations.mark_read(session.user.username, conv["id"])
+                    except Exception:
+                        pass
                     # Stay on last page so new message is visible
                     msgs = await self.bbs.conversations.list_messages(conv["id"])
                     total_pages = max(1, -(-len(msgs) // per_page))
