@@ -176,8 +176,8 @@ async function refreshUsers() {
           <td><strong>${esc(u.username)}</strong></td>
           <td>${esc(u.display_name || "")}</td>
           <td>${u.groups.map((g) => `<span class="badge ${g}">${esc(g)}</span>`).join("")}</td>
-          <td>${(u.created || "").slice(0, 10)}</td>
-          <td>${u.last_login ? esc(u.last_login.slice(0, 16).replace("T", " ")) : "—"}</td>
+          <td>${shortDate(u.created)}</td>
+          <td>${u.last_login ? shortDate(u.last_login) : "—"}</td>
           <td class="actions">
             <button data-edit="${esc(u.username)}">Edit</button>
             <button class="danger" data-del="${esc(u.username)}">Delete</button>
@@ -346,6 +346,13 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[c]);
+}
+
+// ISO datetime -> MM/DD/YY (matches the terminal's short_date convention).
+function shortDate(iso) {
+  if (!iso) return "—";
+  const [y, m, d] = iso.slice(0, 10).split("-");
+  return `${m}/${d}/${y.slice(2)}`;
 }
 
 // ---------------------------------------------------------------- boot

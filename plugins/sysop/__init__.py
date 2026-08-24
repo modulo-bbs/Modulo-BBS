@@ -21,6 +21,19 @@ from shared.telnet_protocol import ANSI
 
 from core import runner
 
+
+def short_date(iso: str | None) -> str:
+    """ISO datetime -> MM/DD/YY, the board's display convention.
+
+    (Single shared formatter so terminal and web agree; i18n hooks in here
+    when we get there.)
+    """
+    if not iso:
+        return "-"
+    date = iso[:10]  # YYYY-MM-DD
+    y, m, d = date.split("-")
+    return f"{m}/{d}/{y[2:]}"
+
 try:  # pragma: no cover - environments without server.session
     from server.session import SessionState
 except Exception:  # noqa: BLE001
@@ -242,15 +255,19 @@ class SysopPlugin(Plugin):
                 C + f" Accounts: {total} total"
                 + (f"  [page {page}/{pages}]" if pages > 1 else "")
                 + R,
-                " " + "-" * 56,
-                W + f" {'USERNAME':<16}{'GROUPS':<22}{'LAST LOGIN':<18}" + R,
-                " " + "-" * 56,
+                " " + "-" * 64,
+                W + f" {'USERNAME':<16}{'GROUPS':<20}{'MEMBER SINCE':<14}"
+                f"{'LAST LOGIN':<14}" + R,
+                " " + "-" * 64,
             ]
             for u in result["users"]:
-                groups = ",".join(u["groups"])[:20]
-                last = (u["last_login"] or "-")[:16].replace("T", " ")
-                lines.append(f" {u['username']:<16}{groups:<22}{last:<18}")
-            lines.append(" " + "-" * 56)
+                groups = ",".join(u["groups"])[:18]
+                member = short_date(u["created"])
+                last = short_date(u["last_login"]) if u["last_login"] else "-"
+                lines.append(
+                    f" {u['username']:<16}{groups:<20}{member:<14}{last:<14}"
+                )
+            lines.append(" " + "-" * 64)
             nav = []
             if page < pages:
                 nav.append("N=Next")
