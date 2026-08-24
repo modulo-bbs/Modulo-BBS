@@ -47,7 +47,11 @@ def _pad_line(text: str, width: int) -> str:
     padded = []
     for i, line in enumerate(lines):
         # Only pad lines that were CRLF-terminated (i.e. displayed rows).
-        is_row = i < len(lines) - 1 or text.endswith("\r\n")
+        # The trailing "" after a final CRLF is *not* a row — it's the
+        # cursor position for the next output (e.g. the Login: prompt).
+        # Padding it would glue the next prompt onto the same line and
+        # overflow the width, wrapping its first char to the far right.
+        is_row = i < len(lines) - 1
         if is_row:
             visible = len(_ANSI_RE.sub("", line))
             if visible < target:
