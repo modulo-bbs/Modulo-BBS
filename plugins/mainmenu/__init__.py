@@ -150,6 +150,8 @@ class MainmenuPlugin(Plugin):
         if user is not None and user.in_group("sysop"):
             lines.append(C + "  [X] Shutdown" + R)
         lines.append(C + "  [Q] Disconnect" + R)
+        G = ANSI.BRIGHT_GREEN
+        lines.append(G + "  >" + R)
         return "\r\n".join(lines)
 
     async def _sysop_shutdown(self, session) -> None:
