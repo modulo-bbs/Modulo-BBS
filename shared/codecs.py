@@ -61,6 +61,8 @@ _TTYPE_MAP: tuple[tuple[str, str], ...] = (
 VALID_CODECS = ("cp437", "utf-8", "ascii")
 DEFAULT_CODEC = "cp437"
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
 
 def detect_codec(terminal_type: str | None) -> str | None:
     """Map a reported TERMINAL-TYPE string to a codec.

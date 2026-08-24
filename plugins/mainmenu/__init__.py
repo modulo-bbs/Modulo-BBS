@@ -74,9 +74,7 @@ class MainmenuPlugin(Plugin):
         self.bbs.events.emit("menu:open", {"session": session, "menu_name": "main"})
 
         while session.is_active:
-            await self.bbs.send(
-                session, self.bbs.screens.render(session, self.name, "main")
-            )
+            await self._show_menu(session)
             # Single keypress, no Enter -- menu keys are one character.
             key = await runner.read_key(self.bbs, session)
             if key is None:
@@ -94,6 +92,38 @@ class MainmenuPlugin(Plugin):
                 await handle_slash(self.bbs, session, line)
                 continue
             await self._handle(session, key)
+
+    # -- rendering / prompt ---------------------------------------------------
+
+    async def _show_menu(self, session) -> None:
+        """Clear screen, render the main menu, show a bottom-aligned ``>`` prompt.
+
+        The prompt always appears regardless of whether the screen came from
+        a file override or the generated fallback — it is rendered here, not
+        baked into either source.
+        """
+        h = getattr(session, "terminal_height", 24)
+
+        # ANSI clear screen + home cursor.
+        await self.bbs.send(session, "\x1b[2J\x1b[H")
+
+        # Screen content (file or generator).
+        screen = self.bbs.screens.render(session, self.name, "main")
+        await self.bbs.send(session, screen)
+
+        # Count visible lines to align the prompt on the bottom row.
+        from shared.codecs import _ANSI_RE
+
+        clean = _ANSI_RE.sub("", screen)
+        lines_used = clean.count("\r\n") + 1
+        pad = max(0, h - lines_used - 1)
+        if pad:
+            await self.bbs.send(session, "\r\n" * pad)
+
+        # Green ``>`` prompt on the bottom line.
+        G = ANSI.BRIGHT_GREEN
+        R = ANSI.RESET
+        await self.bbs.send(session, f"\r\n{G}  >{R}")
 
     # -- dispatch -------------------------------------------------------------
 
@@ -150,8 +180,6 @@ class MainmenuPlugin(Plugin):
         if user is not None and user.in_group("sysop"):
             lines.append(C + "  [X] Shutdown" + R)
         lines.append(C + "  [Q] Disconnect" + R)
-        G = ANSI.BRIGHT_GREEN
-        lines.append(G + "  >" + R)
         return "\r\n".join(lines)
 
     async def _sysop_shutdown(self, session) -> None:
