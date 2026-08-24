@@ -100,29 +100,20 @@ class MainmenuPlugin(Plugin):
 
         The prompt always appears regardless of whether the screen came from
         a file override or the generated fallback — it is rendered here, not
-        baked into either source.  The prompt sits on the terminal's last
-        line via ANSI cursor positioning so backspace cannot dislodge it,
-        and subsequent redraws overprint rather than flash-clear.
+        baked into either source.  Full clear on every redraw guarantees no
+        stale content survives on rows the screen content doesn't touch
+        (e.g. blank lines in a .asc override).  Prompt is pinned to the
+        last row via ANSI cursor positioning.
         """
         h = getattr(session, "terminal_height", 24)
-        w = getattr(session, "terminal_width", 80)
 
-        # First render: full clear.  Subsequent redraws: just home the cursor
-        # and overprint — avoids the flash that makes keystrokes look lost.
-        if not getattr(session, "_menu_drawn", False):
-            await self.bbs.send(session, "\x1b[2J\x1b[H")
-            session._menu_drawn = True
-        else:
-            await self.bbs.send(session, "\x1b[H")
+        # Full clear + home cursor.  Always — partial overwrites leave stale
+        # rows (the .asc blank-line bug proved this).
+        await self.bbs.send(session, "\x1b[2J\x1b[H")
 
         # Screen content (file or generator).
         screen = self.bbs.screens.render(session, self.name, "main")
         await self.bbs.send(session, screen)
-
-        # Erase everything from the end of the content down to the last
-        # row — kills any leftover lines from /screen output, previous
-        # longer renders, or other mid-loop prints.
-        await self.bbs.send(session, "\x1b[J")
 
         # Pin the green ``>`` prompt on the very last terminal line.
         G = ANSI.BRIGHT_GREEN
