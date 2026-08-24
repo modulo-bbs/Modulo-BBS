@@ -35,10 +35,8 @@ Per-plugin menu entries come from each plugin's metadata:
 All standard tokens (`{username}`, `{time}`, `{node}`, `{active}` …) work.
 See `docs/screens.md` for the full vocabulary.
 
-> Note: a file override of `main` is static — it cannot know who's calling,
-> so per-user gating ([X] visible to sysops only) exists only in the
-> generated default. Reskinning means accepting everyone sees what you put
-> in the file.
+A screen is display only — showing `[X] Shutdown` doesn't make it available;
+the dispatcher still rejects unauthorized keys.
 
 ## Data
 

@@ -114,12 +114,7 @@ class MainmenuPlugin(Plugin):
     # -- rendering ------------------------------------------------------------
 
     def _generate_main(self) -> str:
-        """Generated default for screen ``main`` (overridable by file).
-
-        Note: a static file override cannot know the caller, so per-user
-        gating (sysop-only [X]) only exists in this generated variant. That's
-        the trade sysops accept when they reskin.
-        """
+        """Generated default for screen ``main`` (overridable by file)."""
         w = min(80, 60)
         bar = "=" * w
         C = ANSI.BRIGHT_CYAN
@@ -127,8 +122,6 @@ class MainmenuPlugin(Plugin):
         W = ANSI.BRIGHT_WHITE
         R = ANSI.RESET
 
-        # Render for "anyone" — gated entries ([X] Shutdown) are appended by
-        # callers who know the user; the file version is the common case.
         lines = [C + B + bar + R, C + B + "  Main Menu" + R, C + B + bar + R, ""]
         for plugin in self._menuable_for(None):
             label = getattr(plugin, "menu_label", "") or plugin.name
@@ -137,6 +130,7 @@ class MainmenuPlugin(Plugin):
             else:
                 lines.append(C + f"  [{plugin.menu_key.upper()}] {label}" + R)
         lines.append(C + "  [I] System Info" + R)
+        lines.append(C + "  [X] Shutdown" + R)
         lines.append(C + "  [Q] Disconnect" + R)
         return "\r\n".join(lines)
 

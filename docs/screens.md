@@ -59,15 +59,16 @@ available, or grep `register_provider` in the plugin source.
 Flows can pass extra tokens for a single render (e.g. the TOTP secret during
 enrolment). Those are documented by the flow that uses them.
 
-## Generated defaults vs files
+## Files vs generators
 
-Screens whose content is computed (the main menu lists loaded plugins; the
-board list reflects group gates) ship as **generators**: Python fallbacks
-registered per `(plugin, screen)` pair. A sysop file always beats the
-generator. Trade-off to know: a static override can't adapt per caller —
-e.g. an overriding `main.txt` cannot hide `[X] Shutdown` from non-sysops,
-because the file doesn't know who's reading. Gated content stays in
-generators unless you accept everyone seeing it.
+Screens whose content is computed (the main menu lists loaded plugins) ship
+as **generators**: Python fallbacks registered per `(plugin, screen)` pair.
+A sysop file always beats the generator.
+
+A screen is **presentation only** — it never grants or gates anything. Show
+whatever commands you like; the dispatcher decides what each caller may
+actually do, and unauthorized keys are rejected no matter what the screen
+displayed. See `docs/screens.md` companion notes in each plugin's README.
 
 ## For developers
 
