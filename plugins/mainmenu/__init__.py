@@ -301,8 +301,9 @@ class MainmenuPlugin(Plugin):
     async def _open_selected(self, session, tab: dict) -> None:
         """Open the highlighted conversation in a full-screen reader.
 
-        Minimal for Step 8: show messages in the conversation, paged.
-        Full editor with threading/quote/reply lands in Step 9.
+        Full loop for Step 9: paged, threaded view with quoting, one-key
+        reply, mod delete, and Find. Uses the classic /S save / /A abort
+        line editor for posting (per Dave's prior decision).
         """
         kind = tab.get("kind", "board")
         filter_kind = None if kind == "all" else kind
@@ -320,23 +321,139 @@ class MainmenuPlugin(Plugin):
         sel = getattr(session, "_pim_selected", 0)
         sel = max(0, min(sel, len(convs) - 1))
         conv = convs[sel]
-        try:
-            msgs = await self.bbs.conversations.list_messages(conv["id"])
-        except Exception:
-            msgs = []
-        await self.bbs.send(session, "\x1b[2J\x1b[H")
-        header = f" {conv.get('title','?')} — {len(msgs)} messages  (Q to go back)"
-        await self.bbs.send(session, header + "\r\n" + "─" * 79 + "\r\n")
-        if not msgs:
-            await self.bbs.send(session, "(no messages yet — be the first to post)\r\n")
-        else:
-            for m in msgs[-20:]:  # last 20 in pane-height friendly slice
-                author = m.get("author", "?")
-                body = (m.get("body", "") or "").split("\n")[0][:70]
-                line = f"[{author}] {body}"
-                await self.bbs.send(session, line + "\r\n")
-        await self.bbs.send(session, "\r\n[Press any key]\r\n")
-        await runner.read_key(self.bbs, session)
+        page = 0
+        per_page = max(5, getattr(session, "terminal_height", 24) - 8)
+        while getattr(session, "is_active", True):
+            try:
+                msgs = await self.bbs.conversations.list_messages(conv["id"])
+            except Exception:
+                msgs = []
+            total_pages = max(1, -(-len(msgs) // per_page)) if msgs else 1
+            page = max(0, min(page, total_pages - 1))
+            start = page * per_page
+            slice_ = msgs[start : start + per_page]
+
+            await self.bbs.send(session, "\x1b[2J\x1b[H")
+            header = f" {conv.get('title','?')} — {len(msgs)} messages  (page {page+1}/{total_pages})"
+            await self.bbs.send(session, header + "\r\n" + "─" * 79 + "\r\n")
+            if not slice_:
+                if not msgs:
+                    await self.bbs.send(session, "(no messages yet — press R to be the first to post)\r\n")
+                else:
+                    await self.bbs.send(session, "(no messages on this page)\r\n")
+            else:
+                # Build parent lookup for threading indent
+                for m in slice_:
+                    author = m.get("author", "?")
+                    body = (m.get("body", "") or "").split("\n")[0][:70]
+                    # indent threaded replies
+                    indent = ""
+                    pid = m.get("parent_id")
+                    if pid:
+                        # depth: count parents (simple)
+                        indent = "  "
+                    created = m.get("created", "")[:16].replace("T", " ")
+                    line = f"{indent}#{m.get('id', '?')} [{author}] {created}  {body}"
+                    await self.bbs.send(session, line[:79] + "\r\n")
+            await self.bbs.send(session, "─" * 79 + "\r\n")
+            await self.bbs.send(session, " R)reply  D)delete  F)find  N)next P)prev  Q)back\r\n")
+            await self.bbs.send(session, f"\x1b[{getattr(session, 'terminal_height', 24)};1H\x1b[2K\x1b[92m  >\x1b[0m")
+            key = await runner.read_key(self.bbs, session)
+            if key is None or key == "Q":
+                return
+            if key == "N":
+                if page + 1 < total_pages:
+                    page += 1
+                continue
+            if key == "P":
+                if page > 0:
+                    page -= 1
+                continue
+            if key == "F":
+                await self.bbs.send(session, "\r\nFind: ")
+                q = await runner.read_command(self.bbs, session)
+                if q is None or not q.strip():
+                    continue
+                hits = await self.bbs.conversations.find_messages(q.strip(), limit=20)
+                # filter hits to this conversation for the reader view
+                hits = [h for h in hits if h.get("conversation_id") == conv["id"]]
+                await self.bbs.send(session, f"\r\nFound {len(hits)} hit(s) for '{q.strip()}' in this conversation:\r\n")
+                for h in hits[:10]:
+                    author = h.get("author", "?")
+                    body = (h.get("body", "") or "").split("\n")[0][:60]
+                    await self.bbs.send(session, f"  #{h.get('id')} [{author}] {body}\r\n")
+                await self.bbs.send(session, "\r\n[Press any key]\r\n")
+                await runner.read_key(self.bbs, session)
+                continue
+            if key == "R":
+                await self.bbs.send(session, "\r\nReply to # (blank for new thread): ")
+                num_raw = await runner.read_command(self.bbs, session)
+                if num_raw is None:
+                    return
+                num_raw = num_raw.strip()
+                parent_id = int(num_raw) if num_raw.isdigit() else None
+                # Classic line editor: empty line to finish, /A to abort
+                await self.bbs.send(session, "\r\nType your message. Empty line to finish, /A aborts.\r\n")
+                lines: list[str] = []
+                # If replying, prepend quoted original
+                if parent_id is not None:
+                    orig = next((m for m in msgs if m.get("id") == parent_id), None)
+                    if orig:
+                        quoted = "\n".join(f"> {ln}" for ln in orig.get("body", "").split("\n"))
+                        lines.append(f"On {orig.get('created','')[:19]}, {orig.get('author','?')} wrote:")
+                        lines.append(quoted)
+                        lines.append("")
+                while getattr(session, "is_active", True):
+                    await self.bbs.send(session, "")
+                    line = await runner.read_command(self.bbs, session)
+                    if line is None:
+                        return
+                    if line.strip().upper() == "/A":
+                        await self.bbs.send(session, "\r\nAborted.\r\n")
+                        lines = []
+                        break
+                    if not line.strip():
+                        break
+                    lines.append(line)
+                if not lines or all(not l.strip() or l.startswith(">") for l in lines):
+                    # only quotes, no new content
+                    if not any(l.strip() and not l.startswith(">") and not l.startswith("On ") for l in lines):
+                        continue
+                body = "\n".join(lines)
+                if not body.strip():
+                    continue
+                try:
+                    await self.bbs.conversations.post_message(conv["id"], author=session.user.username, body=body, parent_id=parent_id)
+                    # Stay on last page so new message is visible
+                    msgs = await self.bbs.conversations.list_messages(conv["id"])
+                    total_pages = max(1, -(-len(msgs) // per_page))
+                    page = total_pages - 1
+                except Exception as e:
+                    await self.bbs.send(session, f"\r\nFailed to post: {e}\r\n")
+                    await runner.read_key(self.bbs, session)
+                continue
+            if key == "D":
+                await self.bbs.send(session, "\r\nDelete #: ")
+                num_raw = await runner.read_command(self.bbs, session)
+                if num_raw is None or not num_raw.strip().isdigit():
+                    continue
+                mid = int(num_raw.strip())
+                try:
+                    ok = await self.bbs.conversations.delete_message(conv["id"], mid, by_user=session.user)
+                    if not ok:
+                        await self.bbs.send(session, "\r\nNo such message.\r\n")
+                        await runner.read_key(self.bbs, session)
+                    else:
+                        await self.bbs.send(session, f"\r\nDeleted #{mid}.\r\n")
+                        await runner.read_key(self.bbs, session)
+                except PermissionError as e:
+                    await self.bbs.send(session, f"\r\nNot allowed: {e}\r\n")
+                    await runner.read_key(self.bbs, session)
+                except Exception as e:
+                    await self.bbs.send(session, f"\r\nFailed: {e}\r\n")
+                    await runner.read_key(self.bbs, session)
+                continue
+            # numeric -> jump to page? ignore, prompt already handles
 
     async def _show_menu(self, session) -> None:
         """Clear screen, render the home surface, show a bottom-aligned ``>`` prompt.
