@@ -22,6 +22,7 @@ import asyncio
 import sys
 
 from plugins.base import Plugin
+from plugins.mainmenu.tabs import load_tabs, visible_tabs
 from shared.telnet_protocol import ANSI
 
 from core import runner
@@ -35,6 +36,37 @@ def user_can_access(user, requires) -> bool:
     if user is None:
         return False
     return user.can_access(requires)
+
+
+def _age_label(iso: str) -> str:
+    """Human age like '3m ago', '5d ago', '3mo ago' for display."""
+    if not iso:
+        return "—"
+    try:
+        from datetime import datetime, timezone
+
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        delta = now - dt
+        secs = int(delta.total_seconds())
+        if secs < 60:
+            return f"{secs}s ago"
+        mins = secs // 60
+        if mins < 60:
+            return f"{mins}m ago"
+        hours = mins // 60
+        if hours < 24:
+            return f"{hours}h ago"
+        days = hours // 24
+        if days < 30:
+            return f"{days}d ago"
+        months = days // 30
+        if months < 12:
+            return f"{months}mo ago"
+        years = days // 365
+        return f"{years}y ago"
+    except Exception:
+        return "—"
 
 # Session state (guarded so this module imports standalone too).
 try:  # pragma: no cover - guard for environments without server.session
@@ -95,31 +127,141 @@ class MainmenuPlugin(Plugin):
 
     # -- rendering / prompt ---------------------------------------------------
 
-    async def _show_menu(self, session) -> None:
-        """Clear screen, render the main menu, show a bottom-aligned ``>`` prompt.
+    def _is_pim(self, session) -> bool:
+        """True when this session prefers the tabbed PIM home.
 
-        The prompt always appears regardless of whether the screen came from
-        a file override or the generated fallback — it is rendered here, not
-        baked into either source.  Full clear on every redraw guarantees no
-        stale content survives on rows the screen content doesn't touch
-        (e.g. blank lines in a .asc override).  Prompt is pinned to the
-        last row via ANSI cursor positioning.
+        ``home_mode == "menu"`` pins classic list; anything else (unset,
+        ``"pim"``, etc.) renders the tabbed chrome. New users default to PIM.
+        """
+        user = getattr(session, "user", None)
+        prefs = getattr(user, "preferences", {}) if user else {}
+        return prefs.get("home_mode", "pim") != "menu"
+
+    def _active_tab_id(self, session) -> str:
+        return getattr(session, "_pim_active_tab", None) or "boards"
+
+    def _render_tabs(self, session, tabs: list[dict], active_id: str) -> str:
+        """Top tab bar: caps=active in plain fallback, colors in ANSI."""
+        # Plain fallback when terminal can't do ANSI (e.g. UNKNOWN)
+        is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
+        parts: list[str] = []
+        for t in tabs:
+            label = t["label"]
+            is_active = t["id"] == active_id
+            if is_plain:
+                label = label.upper() if is_active else label
+                # active tab in caps per Dave's sketch; no colors
+                parts.append(f" {label} ")
+            else:
+                if is_active:
+                    parts.append(f"{ANSI.BRIGHT_WHITE}{ANSI.BG_BLUE} {label} {ANSI.RESET}")
+                else:
+                    parts.append(f"{ANSI.DIM} {label} {ANSI.RESET}")
+        # join with " | " and pad handled by bbs.send
+        return " | ".join(parts)
+
+    async def _render_pane(self, session, tab: dict) -> str:
+        """Middle pane: filtered conversation list for the active tab.
+
+        Shown inside a CP437 box in ANSI mode, plain dashes in fallback.
+        Each row: ``@author (age): preview`` — up/dn to select (Step 8).
+        """
+        kind = tab.get("kind", "board")
+        # Scope: None kind means "all" — don't filter by kind
+        filter_kind = None if kind == "all" else kind
+        try:
+            convs = await self.bbs.conversations.list_conversations(
+                kind=filter_kind, visible_to=getattr(session, "user", None)
+            )
+        except Exception:
+            convs = []
+        # Show most recent first, cap at pane height (terminal minus chrome)
+        h = getattr(session, "terminal_height", 24)
+        pane_h = max(5, h - 8)  # tabs(1)+sep(1)+prompt(1)+margins
+        convs = convs[:pane_h]
+
+        is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
+        if is_plain:
+            top = "+" + "-" * 78 + "+"
+            bot = "+" + "-" * 78 + "+"
+            hint = "        up/dn select      "
+            # center hint under top border
+            top = "+" + "-" * 20 + "/" + hint + "\\" + "-" * (78 - 20 - len(hint) - 1) + "+"
+        else:
+            top = f"{ANSI.DIM}┌{'─' * 78}┐{ANSI.RESET}"
+            bot = f"{ANSI.DIM}└{'─' * 78}┘{ANSI.RESET}"
+            hint = "        up/dn select      "
+            top = f"{ANSI.DIM}┌{'─' * 20}┤{hint}├{'─' * (78 - 20 - len(hint) - 1)}┐{ANSI.RESET}"
+
+        lines = [top]
+        if not convs:
+            label = tab.get('label','conversations').lower()
+            lines.append(f"│  (no {label} yet)".ljust(79) + "│")
+        else:
+            for c in convs:
+                # preview: last message author + age + body preview
+                title = c.get("title", c.get("id", "?"))[:28]
+                preview = ""
+                try:
+                    msgs = await self.bbs.conversations.list_messages(c["id"])
+                    if msgs:
+                        last = msgs[-1]
+                        author = last.get("author", "?")
+                        body = (last.get("body", "") or "").split("\n")[0][:36]
+                        # age
+                        created = c.get("last_message_at") or c.get("created", "")
+                        age = _age_label(created)
+                        preview = f"@{author} ({age}): {body}"
+                    else:
+                        preview = f"{title} (no messages)"
+                except Exception:
+                    preview = title
+                row = f"│  {preview[:76].ljust(76)} │"
+                lines.append(row)
+        lines.append(bot)
+        lines.append("  ↑/↓ or 1/2/3 to switch tabs, Enter to open, Q to disconnect")
+        return "\r\n".join(lines)
+
+    async def _show_menu(self, session) -> None:
+        """Clear screen, render the home surface, show a bottom-aligned ``>`` prompt.
+
+        Branches on ``preferences.home_mode``:
+        - ``menu`` → classic file-or-generator ``screens/main`` list.
+        - else  → tabbed PIM chrome (tabs + pane). Prompt is owned here,
+          never baked into a screen file. Full clear on every redraw
+          guarantees no stale rows survive (the .asc blank-line bug).
         """
         h = getattr(session, "terminal_height", 24)
 
-        # Full clear + home cursor.  Always — partial overwrites leave stale
+        # Full clear + home cursor. Always — partial overwrites leave stale
         # rows (the .asc blank-line bug proved this).
         await self.bbs.send(session, "\x1b[2J\x1b[H")
 
-        # Screen content (file or generator).
-        screen = self.bbs.screens.render(session, self.name, "main")
-        await self.bbs.send(session, screen)
+        if self._is_pim(session):
+            tabs = visible_tabs(load_tabs(self.bbs), getattr(session, "user", None))
+            active_id = self._active_tab_id(session)
+            # clamp active to visible set
+            if tabs and not any(t["id"] == active_id for t in tabs):
+                active_id = tabs[0]["id"]
+                session._pim_active_tab = active_id  # type: ignore[attr-defined]
+            # band A: tabs
+            tab_bar = self._render_tabs(session, tabs, active_id)
+            await self.bbs.send(session, tab_bar + "\r\n")
+            await self.bbs.send(session, "─" * 79 + "\r\n")
+            # band B: pane
+            active_tab = next((t for t in tabs if t["id"] == active_id), tabs[0] if tabs else {"id": "boards", "label": "Boards", "kind": "board"})
+            pane = await self._render_pane(session, active_tab)
+            await self.bbs.send(session, pane + "\r\n")
+        else:
+            # Classic: file beats generator per docs/screens.md
+            screen = self.bbs.screens.render(session, self.name, "main")
+            await self.bbs.send(session, screen)
 
         # Pin the green ``>`` prompt on the very last terminal line.
         G = ANSI.BRIGHT_GREEN
         R = ANSI.RESET
         await self.bbs.send(session, f"\x1b[{h};1H")   # last row
-        await self.bbs.send(session, f"\x1b[2K")        # clear that row
+        await self.bbs.send(session, "\x1b[2K")        # clear that row
         await self.bbs.send(session, f"{G}  >{R}")
 
     # -- dispatch -------------------------------------------------------------

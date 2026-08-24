@@ -111,8 +111,11 @@ def test_ssh_login_flow_uses_login_plugin(tmp_path):
     text = chan.text
     assert "MODULO" in text.upper()               # core banner kept in SSH flow
     assert "Welcome back, Alice" in text          # login plugin's success line
-    assert "Main Menu" in text                    # post-login menu shown
-    assert "System Info" in text
+    # PIM is now the default home — accept either the classic menu or the
+    # tabbed chrome (both are valid per preferences.home_mode).
+    assert ("Main Menu" in text or "Boards" in text or "up/dn select" in text)
+    # System Info is on the classic menu; the PIM shows the pane hint instead
+    assert ("System Info" in text or "up/dn select" in text or "Boards" in text)
     assert "Goodbye! Thanks for calling." in text
     assert chan.is_closing() or "Goodbye!" in text
 
@@ -161,7 +164,8 @@ def test_ssh_registration_via_login_screen(tmp_path):
     assert sess._session is None
     text = chan.text
     assert "Account created. Welcome, carol!" in text   # falls back to username
-    assert "Main Menu" in text
+    # PIM is default home — same as above
+    assert ("Main Menu" in text or "Boards" in text or "up/dn select" in text)
     # The account was actually persisted by the login plugin.
     assert run(app.users.get("carol")) is not None
 
