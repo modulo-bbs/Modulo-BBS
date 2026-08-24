@@ -60,16 +60,17 @@ def test_tab_switch_numeric_and_arrows(tmp_path):
         # Seed two board conversations so tabs have something to scope
         await app.conversations.create_conversation(kind="board", title="General", created_by="dave", conv_id="general")
         await app.conversations.create_conversation(kind="board", title="Tech", created_by="dave", conv_id="tech")
-        # start on boards (default)
+        # start on boards (explicit, since default is now dashboard)
+        s._pim_active_tab = "boards"
         assert p._active_tab_id(s) == "boards"  # type: ignore[attr-defined]
-        # RIGHT → DMs
+        # RIGHT → DMs (boards is 2, dms is 3)
         assert await p._handle_pim_key(s, "RIGHT") is True  # type: ignore[attr-defined]
         assert s._pim_active_tab == "dms"  # type: ignore[attr-defined]
         # LEFT → back to Boards
         assert await p._handle_pim_key(s, "LEFT") is True  # type: ignore[attr-defined]
         assert s._pim_active_tab == "boards"  # type: ignore[attr-defined]
-        # Numeric 2 → DMs
-        assert await p._handle_pim_key(s, "2") is True  # type: ignore[attr-defined]
+        # Numeric 3 → DMs (1=dashboard, 2=boards, 3=dms)
+        assert await p._handle_pim_key(s, "3") is True  # type: ignore[attr-defined]
         assert s._pim_active_tab == "dms"  # type: ignore[attr-defined]
         # invalid numeric ignored
         assert await p._handle_pim_key(s, "9") is False  # type: ignore[attr-defined]

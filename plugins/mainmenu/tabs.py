@@ -1,9 +1,9 @@
 """Tab registry for the PIM home (see docs/build-plan.md Phase 1, Step 6).
 
-Tabs are filtered views of the same ``core/conversations.py`` engine.
-A tab is: {id, label, kind, key, requires} where kind filters
-conversations (board|channel|dm|group|all) and requires is a group gate
-via ``user.can_access()``.  Sysops can override via
+Tabs are filtered views of the same ``core/conversations.py`` engine (or
+dashboard digest). A tab is: {id, label, kind, key, requires} where kind
+filters conversations (board|channel|dm|group|all) or is a special digest
+kind (dashboard|files|bulletins). Sysops can override via
 ``plugins/mainmenu/data/tabs.json``; plugins can contribute by setting
 ``pim_tab = {...}`` on their Plugin class (collected at on_load).
 """
@@ -13,9 +13,11 @@ import json
 from pathlib import Path
 
 DEFAULT_TABS: list[dict] = [
-    {"id": "boards", "label": "Boards", "kind": "board", "key": "1", "requires": []},
-    {"id": "dms", "label": "DMs", "kind": "dm", "key": "2", "requires": []},
-    {"id": "mentions", "label": "Mentions", "kind": "all", "key": "3", "requires": []},
+    {"id": "dashboard", "label": "Dashboard", "kind": "dashboard", "key": "1", "requires": []},
+    {"id": "boards", "label": "Boards", "kind": "board", "key": "2", "requires": []},
+    {"id": "dms", "label": "DMs", "kind": "dm", "key": "3", "requires": []},
+    {"id": "files", "label": "Files", "kind": "files", "key": "4", "requires": []},
+    {"id": "bulletins", "label": "Bulletins", "kind": "bulletins", "key": "5", "requires": []},
 ]
 
 # Keys reserved for tab switching — never used for board selection
@@ -29,7 +31,7 @@ def _validate_tab(t: dict) -> dict | None:
     for k in ("id", "label", "kind", "key"):
         if k not in t or not isinstance(t[k], str) or not t[k].strip():
             return None
-    if t["kind"] not in ("board", "channel", "dm", "group", "all"):
+    if t["kind"] not in ("board", "channel", "dm", "group", "all", "dashboard", "files", "bulletins"):
         return None
     req = t.get("requires", [])
     if not isinstance(req, list):

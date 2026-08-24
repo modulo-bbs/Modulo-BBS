@@ -19,7 +19,9 @@ def test_default_tabs_load(tmp_path):
     app = _app(tmp_path)
     tabs = load_tabs(app)
     assert len(tabs) == len(DEFAULT_TABS)
-    assert tabs[0]["id"] == "boards"
+    assert tabs[0]["id"] == "dashboard"
+    assert tabs[0]["key"] == "1"
+    assert tabs[1]["id"] == "boards"
     assert tabs[1]["key"] == "2"
 
 
@@ -50,13 +52,18 @@ def test_sysop_override_file(tmp_path):
 
 def test_plugin_contributed_tab(tmp_path):
     app = _app(tmp_path)
+    import plugins.mainmenu.tabs as tm
+    orig = tm.DEFAULT_TABS
+    tm.DEFAULT_TABS = orig[:2]  # leave room for contributed
+    try:
+        class FakePlugin:
+            pim_tab = {"id": "extra", "label": "Extra", "kind": "all", "key": "9", "requires": []}
 
-    class FakePlugin:
-        pim_tab = {"id": "files", "label": "Files", "kind": "all", "key": "4", "requires": []}
-
-    app.plugins = [FakePlugin()]  # type: ignore[assignment]
-    tabs = load_tabs(app)
-    assert any(t["id"] == "files" for t in tabs)
+        app.plugins = [FakePlugin()]  # type: ignore[assignment]
+        tabs = load_tabs(app)
+        assert any(t["id"] == "extra" for t in tabs)
+    finally:
+        tm.DEFAULT_TABS = orig
 
 
 def test_truncates_to_five(tmp_path):

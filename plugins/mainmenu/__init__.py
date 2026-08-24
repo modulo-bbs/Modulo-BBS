@@ -68,6 +68,37 @@ def _age_label(iso: str) -> str:
     except Exception:
         return "—"
 
+
+def _elided(prefix: str, items: list[str], sep: str = ", ", width: int = 77) -> str:
+    """Build prefix + sep.join(items) elided with '...' to fit width (visible cols).
+    Width is inner width (79 - 2 box chars). CP437-safe '...' not '…'.
+    e.g. prefix='DMs: (10 new) from ', items=['Anna','Bob',...] -> 'DMs: (10 new) from Anna, Bob, ...'
+    """
+    if not items:
+        return prefix.rstrip()
+    # try full join, then truncate tail
+    full = prefix + sep.join(items)
+    if len(full) <= width:
+        return full
+    # need elision: keep adding items until we exceed width - len(' ...')
+    ell = " ..."
+    avail = width - len(prefix) - len(ell)
+    if avail <= 0:
+        return (prefix + "...")[:width]
+    out = []
+    cur_len = 0
+    for idx, it in enumerate(items):
+        add = len(it) + (len(sep) if out else 0)
+        if cur_len + add > avail:
+            break
+        out.append(it)
+        cur_len += add
+    if not out:
+        # even first item too long — truncate it
+        return (prefix + items[0][: max(0, width - len(prefix) - len(ell))] + ell)[:width]
+    return prefix + sep.join(out) + ell
+
+
 # Session state (guarded so this module imports standalone too).
 try:  # pragma: no cover - guard for environments without server.session
     from server.session import SessionState
@@ -143,7 +174,7 @@ class MainmenuPlugin(Plugin):
         return prefs.get("home_mode", "pim") != "menu"
 
     def _active_tab_id(self, session) -> str:
-        return getattr(session, "_pim_active_tab", None) or "boards"
+        return getattr(session, "_pim_active_tab", None) or "dashboard"
 
     def _render_tabs(self, session, tabs: list[dict], active_id: str) -> str:
         """Top tab bar: caps=active in plain fallback, colors in ANSI."""
@@ -168,9 +199,133 @@ class MainmenuPlugin(Plugin):
     async def _render_pane(self, session, tab: dict) -> str:
         """Middle pane: filtered conversation list for the active tab.
 
-        Shown inside a CP437 box in ANSI mode, plain dashes in fallback.
-        Each row: ``@author (age): preview`` — up/dn to select (Step 8).
+        In Dashboard tab, this is the digest quick-links list (one row per
+        area with new activity, elided to 79). In other tabs, it's the
+        filtered conversation list (``@author (age): preview``).
         """
+        # Dashboard digest quick-links — each row is a filtered shortcut
+        if tab.get("id") == "dashboard" or tab.get("kind") == "dashboard":
+            # Build digests: DMs / Bulletins / Files / Boards — each as
+            # "Label: (N new) item | item | ..." elided to inner width 77.
+            user = getattr(session, "user", None)
+            digests: list[tuple[str, str]] = []  # (text, target_tab_id)
+            # DMs
+            try:
+                dms = await self.bbs.conversations.list_conversations(kind="dm", visible_to=user)
+            except Exception:
+                dms = []
+            if dms:
+                # other participants for each DM
+                names: list[str] = []
+                uname = getattr(user, "username", "") if user else ""
+                seen_names = set()
+                for c in dms:
+                    parts = c.get("participants", []) or []
+                    other = next((p for p in parts if p != uname), None) or c.get("title", c.get("id","?"))
+                    if other not in seen_names:
+                        names.append(str(other))
+                        seen_names.add(other)
+                prefix = f"DMs: ({len(dms)} new) from "
+                text = _elided(prefix, names, sep=", ", width=74)
+                digests.append((text, "dms"))
+            else:
+                digests.append(("DMs: (no new messages)", "dms"))
+            # Bulletins
+            try:
+                bul = self.bbs.get_plugin("bulletins")
+                if bul is not None and user is not None:
+                    ids = bul.unseen(user)
+                    if ids:
+                        vis = {b["id"]: b for b in bul.scan()}
+                        titles = [vis.get(i, {"title": i})["title"] for i in ids[:8]]
+                        prefix = f"Bulletins: ({len(ids)} new) "
+                        text = _elided(prefix, titles, sep=" | ", width=74)
+                        digests.append((text, "bulletins"))
+                    else:
+                        digests.append(("Bulletins: (no new)", "bulletins"))
+                else:
+                    # no user or no plugin
+                    digests.append(("Bulletins: (no new)", "bulletins"))
+            except Exception:
+                pass
+            # Files
+            try:
+                fp = self.bbs.get_plugin("files")
+                if fp is not None and hasattr(fp, "visible_areas"):
+                    areas = fp.visible_areas(user) if user else []
+                    total = 0
+                    names = []
+                    for a in areas:
+                        try:
+                            n = len(fp.store.list_files(a["id"]))
+                            total += n
+                            names.append(a.get("name", a["id"]))
+                        except Exception:
+                            pass
+                    if total:
+                        prefix = f"Files: ({total} new) "
+                        text = _elided(prefix, names, sep=" | ", width=74)
+                        digests.append((text, "files"))
+                    else:
+                        digests.append(("Files: (no new)", "files"))
+            except Exception:
+                pass
+            # Boards
+            try:
+                boards = await self.bbs.conversations.list_conversations(kind="board", visible_to=user)
+            except Exception:
+                boards = []
+            if boards:
+                titles = [c.get("title", c.get("id","?")) for c in boards[:8]]
+                prefix = f"Boards: ({len(boards)} new) "
+                text = _elided(prefix, titles, sep=" | ", width=74)
+                digests.append((text, "boards"))
+            else:
+                digests.append(("Boards: (no new)", "boards"))
+            # Render digests inside the same box chrome
+            is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
+            if is_plain:
+                top = "+" + "-" * 77 + "+"
+                bot = "+" + "-" * 77 + "+"
+                hint = "        up/dn select      "
+                top = "+" + "-" * 20 + "/" + hint + "\\" + "-" * (77 - 20 - len(hint) - 1) + "+"
+            else:
+                top = f"{ANSI.DIM}┌{'─' * 77}┐{ANSI.RESET}"
+                bot = f"{ANSI.DIM}└{'─' * 77}┘{ANSI.RESET}"
+                hint = "        up/dn select      "
+                top = f"{ANSI.DIM}┌{'─' * 20}┤{hint}├{'─' * (77 - 20 - len(hint) - 1)}┐{ANSI.RESET}"
+            lines = [top]
+            # highlight the selected digest row
+            selected = getattr(session, "_pim_selected", 0)
+            if selected < 0:
+                selected = 0
+            if selected >= len(digests):
+                selected = max(0, len(digests)-1)
+                try:
+                    session._pim_selected = selected
+                except Exception:
+                    pass
+            for idx, (text, _) in enumerate(digests):
+                is_sel = idx == selected
+                # ensure digest fits 74 inside box
+                disp = text[:74].ljust(74)
+                if is_sel:
+                    if is_plain:
+                        row = f"│> {disp} │"
+                    else:
+                        row = f"│{ANSI.REVERSE} {disp} {ANSI.RESET} │"
+                else:
+                    row = f"│  {disp} │"
+                lines.append(row)
+            lines.append(bot)
+            lines.append("  Up/Dn or 1/2/3 to switch tabs, Enter to open, Q to disconnect")
+            # stash target map for Enter handler
+            try:
+                session._pim_dashboard_targets = [t for _, t in digests]
+            except Exception:
+                pass
+            return "\r\n".join(lines)
+
         kind = tab.get("kind", "board")
         # Scope: None kind means "all" — don't filter by kind
         filter_kind = None if kind == "all" else kind
@@ -291,6 +446,16 @@ class MainmenuPlugin(Plugin):
             session._pim_selected = sel + 1  # type: ignore[attr-defined]
             return True
         if key == "ENTER":
+            # Dashboard digest: Enter jumps to the target tab (quick-link)
+            if tabs[active_idx].get("id") == "dashboard":
+                targets = getattr(session, "_pim_dashboard_targets", None)
+                if targets:
+                    sel = getattr(session, "_pim_selected", 0)
+                    sel = max(0, min(sel, len(targets)-1))
+                    session._pim_active_tab = targets[sel]
+                    session._pim_selected = 0
+                    return True
+                return True
             await self._open_selected(session, tabs[active_idx])
             return True
         # H/L as vim left/right when not already consumed above
