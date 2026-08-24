@@ -22,6 +22,33 @@ from core.user import UserManager
 from server.session import Session, SessionManager, SessionState
 
 
+def _pad_line(text: str, width: int) -> str:
+    """Pad every CRLF-terminated line to ``width`` visible characters.
+
+    Classic BBS discipline: each displayed row must fill the terminal width
+    so no character from a previous render bleeds through on a shorter line.
+    ANSI escape sequences are excluded from the width count.  The final
+    fragment (if the text doesn't end with ``\\r\\n``) is left untouched so
+    bare escape commands like ``\\x1b[2J`` aren't polluted with trailing
+    spaces.
+    """
+    if not text or width <= 0:
+        return text
+    from shared.codecs import _ANSI_RE
+
+    lines = text.split("\r\n")
+    padded = []
+    for i, line in enumerate(lines):
+        # Only pad lines that were CRLF-terminated (i.e. displayed rows).
+        is_row = i < len(lines) - 1 or text.endswith("\r\n")
+        if is_row:
+            visible = len(_ANSI_RE.sub("", line))
+            if visible < width:
+                line = line + " " * (width - visible)
+        padded.append(line)
+    return "\r\n".join(padded)
+
+
 class BBSApp:
     """Core application object shared by the server and all plugins."""
 
@@ -108,12 +135,20 @@ class BBSApp:
     async def send(self, session: Session, text: str) -> None:
         """Send ``text`` to ``session``.
 
+        Every CRLF-terminated line is padded to the terminal width so no
+        character from a previous render bleeds through on a shorter line
+        (classic BBS line discipline).  ANSI escape sequences are excluded
+        from the width count so color codes don't cause over- or under-
+        padding.
+
         Prefers delegating to the running server's ``_send`` so codec
         selection (per-session CP437/UTF-8), ANSI stripping in plain-text
         mode, and writer lifecycle checks stay consistent. Falls back to
         writing directly to ``session.writer`` (tests / headless sessions
         that have no attached server).
         """
+        width = getattr(session, "terminal_width", 80)
+        text = _pad_line(text, width)
         if self.server is not None and hasattr(self.server, "_send"):
             await self.server._send(session, text)
             return

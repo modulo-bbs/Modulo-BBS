@@ -287,7 +287,10 @@ def test_bootstrap_default_logon_plugin(tmp_path):
     s = make_session()
     run(run_bootstrap(app, s))
 
-    assert b"AAA\r\n" in bytes(s.writer.buffer)
+    out = bytes(s.writer.buffer)
+    # AAA (3 visible chars) padded to 80 columns = AAA + 77 spaces
+    assert b"AAA" in out
+    assert b"\r\n" in out
     assert s.state is SessionState.DISCONNECTED   # sequence ended -> closed
 
 
