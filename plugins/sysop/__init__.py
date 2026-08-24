@@ -50,11 +50,12 @@ class SysopPlugin(Plugin):
     """[S] Sysop Menu — registry-driven management console."""
 
     name = "sysop"
-    version = "1.0.0"
+    version = "1.0.1"
     description = "Sysop management menu (One-API client)"
     menu_label = "[S] Sysop Menu"
     menu_key = "S"
     menu_order = 90
+    menu_requires = ["sysop"]  # hidden from non-sysops in menus
 
     def __init__(self):
         self.bbs = None
@@ -63,16 +64,16 @@ class SysopPlugin(Plugin):
         self.bbs = bbs
 
     async def on_session_start(self, session) -> None:
+        # Defense in depth: even if reached via a stale hotkey or a custom
+        # menu, a non-sysop gets bounced before any op can run.
+        user = getattr(session, "user", None)
+        if user is None or not user.in_group("sysop"):
+            await self.bbs.send(session, "\r\nAccess denied.\r\n")
+            return
         if SessionState is not None:
             session.state = SessionState.MAIN_MENU
         self.bbs.events.emit("menu:open", {"session": session, "menu_name": "sysop"})
         await self._loop(session)
-
-    # -- access -----------------------------------------------------------------
-
-    def _is_sysop(self, session) -> bool:
-        user = getattr(session, "user", None)
-        return user is not None and user.in_group("sysop")
 
     async def _loop(self, session):
         while getattr(session, "is_active", True):
@@ -151,11 +152,22 @@ class SysopPlugin(Plugin):
             result = await registry.call(self.bbs, session.user, op_name, params)
         except ValidationError as e:
             await self.bbs.send(session, f"\r\n! {e}\r\n")
+            await self._pause(session)
             return
         except PermissionDeniedError as e:
-            await self.bbs.send(session, f"\r\n! Denied: {e}\r\n")
+            await self.bbs.send(
+                session,
+                f"\r\n! Denied: {e}\r\n"
+                "! (your account lacks the required group)\r\n",
+            )
+            await self._pause(session)
             return
         await self._show_result(session, result)
+
+    async def _pause(self, session):
+        """Hold output on screen until a key is pressed."""
+        await self.bbs.send(session, "\r\n[Press any key] ")
+        await runner.read_key(self.bbs, session)
 
     async def _collect_params(self, session, op_name, required, optional):
         """Interactive prompts per PROMPTS spec; generic fallback for others."""
@@ -210,7 +222,8 @@ class SysopPlugin(Plugin):
                 out_lines.append(ln[:58])
                 ln = " " + ln[58:]
             out_lines.append(ln)
-        await self.bbs.send(session, "\r\n" + "\r\n".join(out_lines) + "\r\n\r\n")
+        await self.bbs.send(session, "\r\n" + "\r\n".join(out_lines) + "\r\n")
+        await self._pause(session)
 
 
 __all__ = ["SysopPlugin"]

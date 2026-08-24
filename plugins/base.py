@@ -66,6 +66,9 @@ class Plugin:
     menu_label: str = ""       # Display text ("[M] Message Board")
     menu_key: str = ""         # Hotkey ("M")
     menu_order: int = 100      # Sort order in main menu (lower = higher)
+    # Group gate for appearing in menus at all (evaluated with
+    # user.can_access(); empty/None = visible to everyone).
+    menu_requires: list[str] | None = None
 
     def on_load(self, bbs: Any) -> "None | Awaitable[None]":
         """Called once at startup. Register event handlers and resources.

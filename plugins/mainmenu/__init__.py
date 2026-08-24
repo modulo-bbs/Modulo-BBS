@@ -26,6 +26,16 @@ from shared.telnet_protocol import ANSI
 
 from core import runner
 
+
+def user_can_access(user, requires) -> bool:
+    """Menu visibility gate. Mirrors core User.can_access() for safety when
+    user is None or missing (fail-closed for non-empty requirements)."""
+    if not requires:
+        return True
+    if user is None:
+        return False
+    return user.can_access(requires)
+
 # Session state (guarded so this module imports standalone too).
 try:  # pragma: no cover - guard for environments without server.session
     from server.session import SessionState
@@ -85,7 +95,7 @@ class MainmenuPlugin(Plugin):
             await self._sysop_shutdown(session)
             return
 
-        for plugin in self._menuable():
+        for plugin in self._menuable(session):
             if choice == plugin.menu_key.upper():
                 self.bbs.events.emit("menu:select", {
                     "session": session, "option": choice, "menu_name": "main",
@@ -107,7 +117,7 @@ class MainmenuPlugin(Plugin):
         R = ANSI.RESET
 
         lines = [C + B + bar + R, C + B + "  Main Menu" + R, C + B + bar + R, ""]
-        for plugin in self._menuable():
+        for plugin in self._menuable(session):
             label = getattr(plugin, "menu_label", "") or plugin.name
             if label.startswith("["):
                 lines.append(C + f"  {label}" + R)
@@ -154,9 +164,22 @@ class MainmenuPlugin(Plugin):
             f"  Terminal: {session.terminal_type}\r\n"
         )
 
-    def _menuable(self):
-        """Plugins that appear as hotkey-selectable main-menu items."""
-        items = [p for p in self.bbs.plugins if getattr(p, "menu_key", "")]
+    def _menuable(self, session=None):
+        """Plugins that appear as hotkey-selectable main-menu items.
+
+        A plugin's ``menu_requires`` gate decides visibility per user
+        (e.g. the sysop menu only lists for sysops).
+        """
+        user = getattr(session, "user", None) if session is not None else None
+        return self._menuable_for(user)
+
+    def _menuable_for(self, user):
+        items = [
+            p
+            for p in self.bbs.plugins
+            if getattr(p, "menu_key", "")
+            and user_can_access(user, getattr(p, "menu_requires", None))
+        ]
         items.sort(key=lambda p: (getattr(p, "menu_order", 100), p.menu_key.upper()))
         return items
 
