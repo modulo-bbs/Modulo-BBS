@@ -166,7 +166,7 @@ class MainmenuPlugin(Plugin):
         R = ANSI.RESET
 
         user = getattr(session, "user", None) if session is not None else None
-        lines = [C + B + bar + R, C + B + "  Main Menu" + R, C + B + bar + R, ""]
+        lines = [C + B + bar + R, C + B + "  Main Menu" + R, C + B + bar + R]
         for plugin in self._menuable_for(user):
             label = getattr(plugin, "menu_label", "") or plugin.name
             if label.startswith("["):
