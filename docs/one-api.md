@@ -125,3 +125,59 @@ helper process over a local Unix socket. Not planned today.
 4. Populate operations: users, sessions/kick, boards, doors catalog,
    bulletins, audit events (`sysop:*` events fire on every mutation).
 5. Later: SSE/push for live views if polling proves insufficient.
+
+## Cookbook — curl for a third-party dev
+
+`GET /api/v1/_schema` is the contract. Everything below is `POST /api/v1/<op>` with `Content-Type: application/json` and, when logged in, `Authorization: Bearer <token>`. Tokens are 8h HMAC-signed strings from `auth.login`.
+
+```bash
+# 1) Discover what you can call (public plane shows only user ops if unauthenticated)
+curl -s http://127.0.0.1:8080/api/v1/_schema | jq '.operations[] | .name'
+
+# 2) Log in (same users/ + bcrypt as telnet/SSH)
+curl -s -X POST http://127.0.0.1:8080/api/v1/auth.login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"api_test","password":"bootstrap-pass-1"}'
+# → {"token":"...","expires":"..."}  — save as $TOKEN
+
+# 3) Create a board (sysop-only; fails with 403 for normal users)
+curl -s -X POST http://127.0.0.1:8080/api/v1/conversations.create \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"kind":"board","title":"Trading Post","requires":""}'
+# → {"id":"trading-post", "kind":"board", ...}
+
+# 4) Create a DM — NOTE: participants is a comma-separated *string*, not a JSON array
+#    The creator is auto-included, so as api_test you only name the other side.
+curl -s -X POST http://127.0.0.1:8080/api/v1/conversations.create \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"kind":"dm","title":"Hey Dave","participants":"dave"}'
+# → {"id":"hey-dave","kind":"dm","participants":["api_test","dave"],...}
+# Gotcha: {"participants":["dave"]} → 400 "param participants must be str"
+# For a group DM: "participants":"dave, ana, bob"
+
+# 5) Post a message
+curl -s -X POST http://127.0.0.1:8080/api/v1/messages.post \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"conversation_id":"hey-dave","body":"Hello @dave — test from curl"}'
+# → {"id":1,"conversation_id":"hey-dave","author":"api_test","body":"...","created":"..."}
+
+# 6) List / read
+curl -s -X POST http://127.0.0.1:8080/api/v1/conversations.list \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"kind":"dm"}' | jq .
+curl -s -X POST http://127.0.0.1:8080/api/v1/messages.list \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"conversation_id":"hey-dave","page":1,"per_page":25}' | jq .
+
+# 7) Find across conversations
+curl -s -X POST http://127.0.0.1:8080/api/v1/messages.find \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"query":"hello","limit":20}' | jq .
+```
+
+**Common pitfalls:**
+- `participants` is `str` (`"dave"` or `"dave, ana"`), not `["dave"]` — the server splits on `,` and trims. See `core/opdefs.py:_conversations_create`.
+- `requires` for boards is also a comma-separated `str` of groups (`"sysop"` or `""` for public), not an array.
+- `kind` must be one of `board|channel|dm|group|dashboard|files|bulletins` per `plugins/mainmenu/tabs.py:DEFAULT_TABS`.
+- Unauthenticated `_schema` on the public plane intentionally omits sysop-gated ops — log in to see the full management plane (loopback-only).
+
