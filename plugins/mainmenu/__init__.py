@@ -471,20 +471,41 @@ class MainmenuPlugin(Plugin):
         await self.bbs.send(session, "\x1b[2J\x1b[H")
 
         if self._is_pim(session):
-            tabs = visible_tabs(load_tabs(self.bbs), getattr(session, "user", None))
-            active_id = self._active_tab_id(session)
-            # clamp active to visible set
-            if tabs and not any(t["id"] == active_id for t in tabs):
-                active_id = tabs[0]["id"]
-                session._pim_active_tab = active_id  # type: ignore[attr-defined]
-            # band A: tabs
-            tab_bar = self._render_tabs(session, tabs, active_id)
-            await self.bbs.send(session, tab_bar + "\r\n")
-            await self.bbs.send(session, "─" * 79 + "\r\n")
-            # band B: pane
-            active_tab = next((t for t in tabs if t["id"] == active_id), tabs[0] if tabs else {"id": "boards", "label": "Boards", "kind": "board"})
-            pane = await self._render_pane(session, active_tab)
-            await self.bbs.send(session, pane + "\r\n")
+            # File beats generator per docs/screens.md — if a sysop dropped
+            # plugins/mainmenu/screens/pim.ans/.asc/.txt, render it instead
+            # of the generated tabbed chrome.
+            try:
+                pim_file = self.bbs.screens.render(session, self.name, "pim")
+                if pim_file and "[missing screen" not in pim_file:
+                    await self.bbs.send(session, pim_file + "\r\n")
+                else:
+                    tabs = visible_tabs(load_tabs(self.bbs), getattr(session, "user", None))
+                    active_id = self._active_tab_id(session)
+                    # clamp active to visible set
+                    if tabs and not any(t["id"] == active_id for t in tabs):
+                        active_id = tabs[0]["id"]
+                        session._pim_active_tab = active_id  # type: ignore[attr-defined]
+                    # band A: tabs
+                    tab_bar = self._render_tabs(session, tabs, active_id)
+                    await self.bbs.send(session, tab_bar + "\r\n")
+                    await self.bbs.send(session, "─" * 79 + "\r\n")
+                    # band B: pane
+                    active_tab = next((t for t in tabs if t["id"] == active_id), tabs[0] if tabs else {"id": "boards", "label": "Boards", "kind": "board"})
+                    pane = await self._render_pane(session, active_tab)
+                    await self.bbs.send(session, pane + "\r\n")
+            except Exception:
+                # Fall back to generated chrome on any render error
+                tabs = visible_tabs(load_tabs(self.bbs), getattr(session, "user", None))
+                active_id = self._active_tab_id(session)
+                if tabs and not any(t["id"] == active_id for t in tabs):
+                    active_id = tabs[0]["id"]
+                    session._pim_active_tab = active_id  # type: ignore[attr-defined]
+                tab_bar = self._render_tabs(session, tabs, active_id)
+                await self.bbs.send(session, tab_bar + "\r\n")
+                await self.bbs.send(session, "─" * 79 + "\r\n")
+                active_tab = next((t for t in tabs if t["id"] == active_id), tabs[0] if tabs else {"id": "boards", "label": "Boards", "kind": "board"})
+                pane = await self._render_pane(session, active_tab)
+                await self.bbs.send(session, pane + "\r\n")
         else:
             # Classic: file beats generator per docs/screens.md
             screen = self.bbs.screens.render(session, self.name, "main")

@@ -117,6 +117,6 @@ Each plugin documents its own screens and tokens in `plugins/<name>/docs/README.
 
 | Plugin | Screens |
 |---|---|
-| mainmenu | `main` (generated) |
+| mainmenu | `main` (classic, generated) + `pim` (tabbed PIM chrome, generated — file `pim.ans/.asc/.txt` beats it) |
 | logon | `splash`, `welcome` (+ anything referenced in config.yaml `logon_sequence`) |
 | login | `login`, `register`, `totp_setup`, `totp_verify` |
