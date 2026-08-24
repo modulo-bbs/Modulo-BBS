@@ -1,6 +1,7 @@
-"""Tests for the HTTP control API plugin and sysop shutdown command."""
+"""Tests for the HTTP API plugin (legacy surface + lifecycle)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 import time
@@ -12,6 +13,23 @@ from unittest.mock import MagicMock
 import pytest
 
 from plugins.api.handler import BBSAPIHandler, set_bbs
+
+TEST_LOOP = None
+
+
+@pytest.fixture(autouse=True)
+def _pump_loop():
+    """Legacy shutdown/broadcast now dispatch through the ops registry,
+    which needs a running event loop to schedule onto."""
+    global TEST_LOOP
+    loop = asyncio.new_event_loop()
+    TEST_LOOP = loop
+    t = threading.Thread(target=loop.run_forever, daemon=True)
+    t.start()
+    yield loop
+    loop.call_soon_threadsafe(loop.stop)
+    t.join(timeout=2)
+    loop.close()
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +82,11 @@ class _FakeBBS:
         self.plugins = [_FakePlugin("login"), _FakePlugin("mainmenu")]
         self.config = {}
         self.sent: list[tuple] = []
+        # Legacy shutdown/broadcast dispatch through the ops registry, which
+        # emits audit events on the bus.
+        from core.events import EventBus
+
+        self.events = EventBus()
 
     async def send(self, session, text):
         self.sent.append((session, text))
@@ -77,14 +100,16 @@ def bbs():
 @pytest.fixture
 def api_server(bbs):
     """Start a ThreadingHTTPServer on a free port for testing."""
+    import plugins.api.handler as h
+
     set_bbs(bbs, keys=[])
+    h._loop = TEST_LOOP
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), BBSAPIHandler)
     port = httpd.server_address[1]
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     yield httpd, port, bbs
     httpd.shutdown()
-    import plugins.api.handler as h
     h._bbs = None
     h._api_keys = set()
     h._loop = None
@@ -251,8 +276,9 @@ class TestBroadcast:
         httpd, port, bbs = api_server
         data, status = _post(port, "/api/broadcast", {"message": "Hello everyone"})
         assert status == 200
-        assert data["status"] == "broadcasting"
-        # No active sessions, so nothing sent yet (async task needs a loop).
+        assert data["sent"] == 0  # no active sessions
+        # Allow the registry's audit-event task to run; nothing should explode.
+        time.sleep(0.1)
 
     def test_broadcast_empty_message_rejected(self, api_server):
         httpd, port, bbs = api_server
@@ -309,7 +335,7 @@ class TestPluginLifecycle:
         bbs.config = {"api": {"enabled": False}}
         plugin = APIPlugin()
         plugin.on_load(bbs)
-        assert plugin._httpd is None
+        assert plugin._httpds == []
 
     def test_enabled_plugin_starts_server(self):
         from plugins.api import APIPlugin
@@ -318,13 +344,13 @@ class TestPluginLifecycle:
         bbs.config = {"api": {"enabled": True, "port": 0, "host": "127.0.0.1"}}
         plugin = APIPlugin()
         plugin.on_load(bbs)
-        assert plugin._httpd is not None
-        assert plugin._thread is not None
+        assert len(plugin._httpds) == 1
+        assert plugin._threads
         plugin.on_unload()
-        assert plugin._httpd is None
+        assert plugin._httpds == []
 
     def test_bind_failure_logged_not_raised(self):
-        """Port already in use → plugin loads but httpd is None."""
+        """Port already in use → plugin loads but no listener is created."""
         from http.server import ThreadingHTTPServer as RealHTTPServer
         from plugins.api import APIPlugin
 
@@ -339,6 +365,6 @@ class TestPluginLifecycle:
         try:
             plugin = APIPlugin()
             plugin.on_load(bbs)  # should not raise
-            assert plugin._httpd is None
+            assert plugin._httpds == []
         finally:
             RealHTTPServer.__init__ = orig_init

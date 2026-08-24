@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modulo BBS — SysOp Console</title>
+<link rel="stylesheet" href="/admin/style.css">
+</head>
+<body>
+<!-- Login view -->
+<div id="login-view" class="center-screen">
+  <form id="login-form" class="card login-card">
+    <h1>MODULO<span class="accent">BBS</span></h1>
+    <p class="subtitle">SysOp Console</p>
+    <label>Username
+      <input id="login-user" type="text" autocomplete="username" required>
+    </label>
+    <label>Password
+      <input id="login-pass" type="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit">Sign in</button>
+    <p id="login-error" class="error hidden"></p>
+  </form>
+</div>
+
+<!-- Console view -->
+<div id="console-view" class="hidden">
+  <header>
+    <h1>MODULO<span class="accent">BBS</span> <small>SysOp Console</small></h1>
+    <nav>
+      <button data-tab="dashboard" class="tab active">Dashboard</button>
+      <button data-tab="users" class="tab">Users</button>
+      <button data-tab="sessions" class="tab">Sessions</button>
+      <button data-tab="explore" class="tab">API</button>
+      <button id="logout" class="ghost">Log out</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Dashboard -->
+    <section id="tab-dashboard">
+      <div class="grid3">
+        <div class="card stat"><span class="stat-num" id="stat-nodes">–</span><span class="stat-label">Nodes active</span></div>
+        <div class="card stat"><span class="stat-num" id="stat-max">–</span><span class="stat-label">Max nodes</span></div>
+        <div class="card stat"><span class="stat-num" id="stat-plugins">–</span><span class="stat-label">Plugins loaded</span></div>
+      </div>
+      <div class="card">
+        <h2>System health</h2>
+        <pre id="health-json" class="code"></pre>
+      </div>
+    </section>
+
+    <!-- Users -->
+    <section id="tab-users" class="hidden">
+      <div class="toolbar">
+        <input id="user-filter" type="search" placeholder="Filter users…">
+        <button id="user-new" class="primary">+ New user</button>
+      </div>
+      <div class="card"><table id="users-table">
+        <thead><tr><th>Username</th><th>Display name</th><th>Groups</th><th>Created</th><th>Last login</th><th></th></tr></thead>
+        <tbody id="users-body"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+      </table></div>
+
+      <dialog id="user-dialog" class="card">
+        <form method="dialog" id="user-form">
+          <h2 id="user-dialog-title">New user</h2>
+          <label>Username<input id="uf-username" type="text" required></label>
+          <label>Password <small>(blank on edit = keep)</small><input id="uf-password" type="password"></label>
+          <label>Display name<input id="uf-display" type="text"></label>
+          <label>Email<input id="uf-email" type="email"></label>
+          <label>Groups <small>(comma-separated)</small><input id="uf-groups" type="text" value="user"></label>
+          <menu>
+            <button value="cancel" formnovalidate>Cancel</button>
+            <button value="save" id="uf-save" class="primary">Save</button>
+          </menu>
+          <p id="user-dialog-error" class="error hidden"></p>
+        </form>
+      </dialog>
+    </section>
+
+    <!-- Sessions -->
+    <section id="tab-sessions" class="hidden">
+      <div class="card"><table id="sessions-table">
+        <thead><tr><th>Node</th><th>User</th><th>Address</th><th>State</th><th>Idle</th><th></th></tr></thead>
+        <tbody id="sessions-body"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+      </table></div>
+    </section>
+
+    <!-- API explorer -->
+    <section id="tab-explore" class="hidden">
+      <div class="card">
+        <h2>Operations (this plane)</h2>
+        <p class="muted">Every capability below is callable from any client. Click to try it.</p>
+        <div id="op-list"></div>
+      </div>
+      <dialog id="op-dialog" class="card">
+        <form method="dialog" id="op-form">
+          <h2 id="op-title"></h2>
+          <p id="op-desc" class="muted"></p>
+          <div id="op-fields"></div>
+          <pre id="op-result" class="code hidden"></pre>
+          <menu>
+            <button value="cancel" formnovalidate>Close</button>
+            <button value="run" id="op-run" class="primary">Run</button>
+          </menu>
+        </form>
+      </dialog>
+    </section>
+  </main>
+  <footer><span id="plane-badge"></span> · one-api · <span id="conn-status">connected</span></footer>
+</div>
+
+<script src="/admin/app.js"></script>
+</body>
+</html>

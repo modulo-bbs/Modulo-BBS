@@ -1,0 +1,151 @@
+/* Modulo BBS SysOp Console — vanilla CSS, no frameworks, no build step. */
+
+:root {
+  --bg: #0d1117;
+  --card: #161b22;
+  --border: #30363d;
+  --fg: #e6edf3;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --green: #3fb950;
+  --red: #f85149;
+  --amber: #d29922;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.5 ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+.error { color: var(--red); margin: 8px 0 0; }
+.accent { color: var(--accent); }
+
+/* Login */
+.center-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.login-card { width: 320px; }
+.login-card h1 { margin: 0; letter-spacing: 2px; }
+.subtitle { color: var(--muted); margin-top: 0; }
+
+/* Layout */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+header h1 { font-size: 16px; margin: 0; letter-spacing: 1px; }
+header h1 small { color: var(--muted); font-weight: normal; }
+nav { display: flex; gap: 8px; }
+
+main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+
+footer {
+  padding: 10px 20px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.stat { display: flex; flex-direction: column; align-items: center; padding: 24px; }
+.stat-num { font-size: 40px; font-weight: bold; color: var(--accent); }
+.stat-label { color: var(--muted); }
+
+h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-top: 0; }
+
+/* Controls */
+button {
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font: inherit;
+}
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: #04121f; border-color: var(--accent); font-weight: bold; }
+button.danger { color: var(--red); border-color: var(--red); }
+button.ghost { border-color: transparent; color: var(--muted); }
+button.tab.active { border-color: var(--accent); color: var(--accent); }
+
+input, select {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font: inherit;
+  width: 100%;
+}
+label { display: block; margin-bottom: 10px; color: var(--muted); }
+label input { margin-top: 4px; }
+
+.toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+.toolbar input { max-width: 280px; }
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: normal; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; }
+tbody tr:hover { background: rgba(88, 166, 255, 0.06); }
+td.actions { text-align: right; white-space: nowrap; }
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  margin-right: 4px;
+}
+.badge.sysop { color: var(--amber); border-color: var(--amber); }
+
+.code {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  overflow-x: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+dialog {
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 420px;
+  max-width: 90vw;
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+dialog menu { display: flex; gap: 8px; justify-content: flex-end; padding: 0; margin: 0; }
+
+#op-list .op-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+}
+#op-list .op-name { color: var(--accent); min-width: 220px; }
+#op-list button { padding: 2px 10px; font-size: 12px; margin-left: auto; }

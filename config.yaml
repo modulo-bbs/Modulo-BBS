@@ -33,7 +33,7 @@ logon_sequence:
 # HTTP control API (health, sessions, shutdown, broadcast).
 # Disabled by default — set enabled: true to start the API server.
 api:
-  enabled: false
+  enabled: true
   host: "127.0.0.1"
   port: 8080
   # keys:
