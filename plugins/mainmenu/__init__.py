@@ -99,6 +99,80 @@ def _elided(prefix: str, items: list[str], sep: str = ", ", width: int = 77) -> 
     return prefix + sep.join(out) + ell
 
 
+def _strip_ansi(s: str) -> str:
+    import re
+    return re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', s)
+
+
+def _hint_for_session(session) -> str:
+    """Hint text: arrows+WASD on ANSI/CP437, WASD only on plain/UTF-8."""
+    is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
+    codec = getattr(session, "codec", "cp437")
+    # CP437 arrows are 0x18-0x1B; when encoded as cp437 they become single-byte glyphs.
+    # Use Unicode arrows that map to those bytes via cp437 codec; fallback to WASD.
+    if not is_plain and codec == "cp437":
+        # 4 arrows (CP437 0x18-0x1B) + '/' + WASD = 9, plus ' select ' → 17
+        # Use raw control bytes that encode as 0x18-0x1B on cp437 wire and show as arrows in SyncTERM
+        return " \x18\x19\x1B\x1A/WASD select "
+    else:
+        return " WASD select "
+
+
+def _build_top(tab_bar_visible: str, hint: str, is_plain: bool, width: int = 77) -> str:
+    """Build the box top border where '/' and '\\' (or '┤'/'├') sit under tab ' | ' delimiters.
+
+    tab_bar_visible is the visible tab bar (no ANSI). We find pipe positions
+    (the '|' in ' | ') and place the left slash at the first pipe and the
+    right slash at the last pipe, with hint centered between them. Total inner
+    width is 77 between the '+'/'┌' and '+'/'┐'. CP437-safe.
+    """
+    # find pipe positions in tab_bar_visible
+    pipes = []
+    idx = tab_bar_visible.find(" | ")
+    while idx != -1:
+        pipes.append(idx + 1)  # position of '|' within tab bar
+        idx = tab_bar_visible.find(" | ", idx + 3)
+    if not pipes:
+        # no delimiters (single tab) — fallback to centered hint at fixed 20
+        left = 20
+        right = left + len(hint) + 1
+    else:
+        left = pipes[0]
+        right = pipes[-1]
+        # clamp to inner width
+        left = max(0, min(left, width - len(hint) - 2))
+        right = min(width - 1, max(right, left + len(hint) + 1))
+        # if hint doesn't fit between left and right, expand to fit
+        if right - left - 1 < len(hint):
+            # center hint, slashes just outside it
+            center = width // 2
+            left = max(0, center - len(hint)//2 - 1)
+            right = min(width - 1, left + len(hint) + 1)
+    # build inner
+    inner = ["-"] * width if is_plain else ["─"] * width
+    # place slashes/chars
+    if is_plain:
+        inner[left] = "/"
+        inner[right] = "\\"
+    else:
+        inner[left] = "┤"
+        inner[right] = "├"
+    # place hint centered between slashes (or centered in width if no pipes)
+    if pipes and right - left - 1 >= len(hint):
+        start = left + 1 + (right - left - 1 - len(hint)) // 2
+    else:
+        start = (width - len(hint)) // 2
+    for i, ch in enumerate(hint):
+        pos = start + i
+        if 0 <= pos < width and inner[pos] in ("-", "─"):
+            inner[pos] = ch
+    # wrap with box ends
+    if is_plain:
+        return "+" + "".join(inner) + "+"
+    else:
+        return f"{ANSI.DIM}┌{''.join(inner)}┐{ANSI.RESET}"
+
+
 # Session state (guarded so this module imports standalone too).
 try:  # pragma: no cover - guard for environments without server.session
     from server.session import SessionState
@@ -177,23 +251,31 @@ class MainmenuPlugin(Plugin):
         return getattr(session, "_pim_active_tab", None) or "dashboard"
 
     def _render_tabs(self, session, tabs: list[dict], active_id: str) -> str:
-        """Top tab bar: caps=active in plain fallback, colors in ANSI."""
-        # Plain fallback when terminal can't do ANSI (e.g. UNKNOWN)
+        """Top tab bar: caps=active in plain fallback, colors in ANSI.
+
+        Every tab is padded to at least 11 visible columns (9 inner + 2 spaces)
+        so the 9-char '←↑↓→/WASD' hint has room and the box slashes can land
+        under a ' | ' delimiter. With 5 tabs: 5*11 + 4*3 = 67 cols < 79.
+        """
         is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
+        MIN_INNER = 9
         parts: list[str] = []
         for t in tabs:
             label = t["label"]
             is_active = t["id"] == active_id
+            # pad inner label to MIN_INNER
+            core = label.upper() if (is_plain and is_active) else label
+            if len(core) < MIN_INNER:
+                core = core.center(MIN_INNER)
+            else:
+                core = core[:MIN_INNER]
             if is_plain:
-                label = label.upper() if is_active else label
-                # active tab in caps per Dave's sketch; no colors
-                parts.append(f" {label} ")
+                parts.append(f" {core} ")
             else:
                 if is_active:
-                    parts.append(f"{ANSI.BRIGHT_WHITE}{ANSI.BG_BLUE} {label} {ANSI.RESET}")
+                    parts.append(f"{ANSI.BRIGHT_WHITE}{ANSI.BG_BLUE} {core} {ANSI.RESET}")
                 else:
-                    parts.append(f"{ANSI.DIM} {label} {ANSI.RESET}")
-        # join with " | " and pad handled by bbs.send
+                    parts.append(f"{ANSI.DIM} {core} {ANSI.RESET}")
         return " | ".join(parts)
 
     async def _render_pane(self, session, tab: dict) -> str:
@@ -289,17 +371,14 @@ class MainmenuPlugin(Plugin):
             else:
                 digests.append(("Boards: (no new)", "boards"))
             # Render digests inside the same box chrome
+            # dynamic top: slashes follow tab ' | ' delimiters, hint is arrows+WASD on ANSI, WASD on plain
             is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
-            if is_plain:
-                top = "+" + "-" * 77 + "+"
-                bot = "+" + "-" * 77 + "+"
-                hint = "        up/dn select      "
-                top = "+" + "-" * 20 + "/" + hint + "\\" + "-" * (77 - 20 - len(hint) - 1) + "+"
-            else:
-                top = f"{ANSI.DIM}┌{'─' * 77}┐{ANSI.RESET}"
-                bot = f"{ANSI.DIM}└{'─' * 77}┘{ANSI.RESET}"
-                hint = "        up/dn select      "
-                top = f"{ANSI.DIM}┌{'─' * 20}┤{hint}├{'─' * (77 - 20 - len(hint) - 1)}┐{ANSI.RESET}"
+            from plugins.mainmenu.tabs import load_tabs, visible_tabs
+            tabs_for_top = visible_tabs(load_tabs(self.bbs), getattr(session, "user", None))
+            tab_bar_vis = _strip_ansi(self._render_tabs(session, tabs_for_top, self._active_tab_id(session)))
+            hint = _hint_for_session(session)
+            top = _build_top(tab_bar_vis, hint, is_plain, width=77)
+            bot = "+" + "-" * 77 + "+" if is_plain else f"{ANSI.DIM}└{'─' * 77}┘{ANSI.RESET}"
             lines = [top]
             # highlight the selected digest row
             selected = getattr(session, "_pim_selected", 0)
@@ -346,19 +425,14 @@ class MainmenuPlugin(Plugin):
         pane_h = max(5, h - 8)  # tabs(1)+sep(1)+prompt(1)+margins
         convs = convs[:pane_h]
 
+        # dynamic top: slashes follow tab ' | ' delimiters, hint is arrows+WASD on ANSI, WASD on plain
         is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
-        if is_plain:
-            top = "+" + "-" * 77 + "+"
-            bot = "+" + "-" * 77 + "+"
-            hint = "        up/dn select      "
-            # center hint under top border
-            top = "+" + "-" * 20 + "/" + hint + "\\" + "-" * (77 - 20 - len(hint) - 1) + "+"
-        else:
-            top = f"{ANSI.DIM}┌{'─' * 77}┐{ANSI.RESET}"
-            bot = f"{ANSI.DIM}└{'─' * 77}┘{ANSI.RESET}"
-            hint = "        up/dn select      "
-            top = f"{ANSI.DIM}┌{'─' * 20}┤{hint}├{'─' * (77 - 20 - len(hint) - 1)}┐{ANSI.RESET}"
-
+        from plugins.mainmenu.tabs import load_tabs, visible_tabs
+        tabs_for_top = visible_tabs(load_tabs(self.bbs), getattr(session, "user", None))
+        tab_bar_vis = _strip_ansi(self._render_tabs(session, tabs_for_top, self._active_tab_id(session)))
+        hint = _hint_for_session(session)
+        top = _build_top(tab_bar_vis, hint, is_plain, width=77)
+        bot = "+" + "-" * 77 + "+" if is_plain else f"{ANSI.DIM}└{'─' * 77}┘{ANSI.RESET}"
         lines = [top]
         if not convs:
             label = tab.get('label','conversations').lower()

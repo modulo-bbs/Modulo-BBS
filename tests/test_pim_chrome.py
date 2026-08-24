@@ -70,8 +70,8 @@ def test_pim_shows_tabs_and_pane(tmp_path):
     text = s.writer.text()  # type: ignore[union-attr]
     # tab bar: active tab in caps for ANSI we expect colors + label
     assert "Boards" in text
-    # pane border + hint
-    assert "up/dn select" in text
+    # pane border + hint (now WASD on plain, arrows+WASD on CP437/ANSI)
+    assert "select" in text.lower()
     # pane content includes the seeded message preview
     assert "hello world" in text or "General" in text or "dave" in text
     # prompt is pinned at bottom (contains >)
