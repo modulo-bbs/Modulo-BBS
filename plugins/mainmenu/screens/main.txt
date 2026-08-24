@@ -1,0 +1,9 @@
+{BRIGHT_YELLOW}{BOLD}============================================={RESET}
+ {BRIGHT_YELLOW}DAVE'S CUSTOM MENU{RESET} | {time} | node {node}
+ {BRIGHT_YELLOW}============================================={RESET}
+ Welcome, {username}. {active}/{maxnodes} online.
+
+  >> M)essages   F)iles   D)oors
+  >> C)hat       B)ulletins
+
+ Select:

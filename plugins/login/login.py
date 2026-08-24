@@ -27,6 +27,7 @@ from datetime import datetime
 from pathlib import Path
 
 from shared.telnet_protocol import ANSI
+from core.screens import ANSI_TOKENS
 
 logger = logging.getLogger("modulo.plugins.login")
 
@@ -45,60 +46,37 @@ except Exception:  # noqa: BLE001
 
 # --- ANSI placeholder tokens -------------------------------------------------
 
-# Map a {TOKEN} written in a screen template to an ANSI code from
-# shared.telnet_protocol.ANSI. Keeps screen files readable while still using
-# the canonical ANSI constants.
-_ANSI_NAMES = [
-    "RESET", "BOLD", "DIM", "UNDERLINE", "BLINK", "REVERSE",
-    "BLACK", "RED", "GREEN", "YELLOW", "BLUE", "MAGENTA", "CYAN", "WHITE",
-    "BRIGHT_BLACK", "BRIGHT_BLUE", "BRIGHT_CYAN", "BRIGHT_GREEN",
-    "BRIGHT_MAGENTA", "BRIGHT_RED", "BRIGHT_WHITE", "BRIGHT_YELLOW",
-    "BG_BLACK", "BG_BLUE", "BG_CYAN", "BG_GREEN", "BG_MAGENTA",
-    "BG_RED", "BG_WHITE", "BG_YELLOW",
-    "CLEAR_SCREEN", "CLEAR_LINE",
-]
-_ANSI_TOKENS: dict[str, str] = {
-    name: getattr(ANSI, name) for name in _ANSI_NAMES
-}
-_ANSI_TOKENS["CLEAR"] = ANSI.CLEAR_SCREEN          # screen-clear shortcut
-_ANSI_TOKENS["HOME"] = "\x1b[H"                     # cursor home (1;1)
+# ANSI token substitution lives in core/screens.py (ANSI_TOKENS) now; the
+# table below is retained only for the custom-dir fallback path.
+_ANSI_TOKENS = ANSI_TOKENS
 
 
 class ScreenLoader:
-    """Load ``screens/<name>.txt`` templates and substitute ANSI constants
-    and runtime placeholder values.
+    """Load login screens through the core screen service.
 
-    Screens are sysop-editable text files. ``{ANSI_NAME}`` tokens are replaced
-    with the matching escape code; any extra keyword placeholder (e.g.
-    ``{SECRET}``) passed to :meth:`render` is replaced with its runtime value.
+    Resolution (.ans > .asc > .txt), byte-faithful CRLF handling, and token
+    substitution ({ANSI_NAME} constants + runtime {KEY} placeholders) are
+    the screen service's job now (see core/screens.py). This wrapper keeps
+    the ``render(name, **kwargs)`` call-shape the flows use.
     """
 
     def __init__(self, bbs=None, screens_dir: Path | None = None):
         self.bbs = bbs
         self.screens_dir = Path(screens_dir) if screens_dir else SCREENS_DIR
-        self._cache: dict[str, str] = {}
-
-    def load(self, name: str) -> str:
-        """Return the ANSI-substituted template for ``name`` (cached).
-
-        Reads bytes and decodes manually so ``\\r\\n`` line endings survive:
-        ``Path.read_text()`` applies universal-newline translation which
-        collapses CRLF to bare LF, causing staircase wrapping in SyncTERM
-        (bare LF moves down a row without returning to column 0).
-        """
-        if name not in self._cache:
-            text = (self.screens_dir / name).read_bytes().decode("utf-8")
-            for token, code in _ANSI_TOKENS.items():
-                text = text.replace("{" + token + "}", code)
-            self._cache[name] = text
-        return self._cache[name]
 
     def render(self, name: str, **kwargs: object) -> str:
-        """Load the template and substitute runtime ``{KEY}`` placeholders."""
-        text = self.load(name)
-        for key, value in kwargs.items():
-            text = text.replace("{" + key + "}", str(value))
-        return text
+        svc = getattr(self.bbs, "screens", None) if self.bbs else None
+        if svc is not None and self.screens_dir == SCREENS_DIR:
+            stem = name.rsplit(".", 1)[0]
+            return svc.render(None, "login", stem, **kwargs)
+        # Fallback for custom dirs (tests): direct read + ANSI substitution.
+        from core.banner import substitute_tokens
+
+        raw = (self.screens_dir / name).read_bytes()
+        return substitute_tokens(raw.decode("utf-8", errors="replace"), **kwargs)
+
+    def load(self, name: str) -> str:
+        return self.render(name)
 
 
 # --- Session I/O ---------------------------------------------------------------

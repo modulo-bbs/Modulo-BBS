@@ -83,7 +83,11 @@ def make_app(tmp_path):
 
 
 def make_logon(app, tmp_path, sequence):
-    """Build a loaded LogonPlugin wired to config + a throwaway screens dir."""
+    """Build a loaded LogonPlugin wired to config + a throwaway screens dir.
+
+    Points the core screen service's logon dir at the throwaway location so
+    screen steps read from tmp (not the project-root screens/).
+    """
     screens = tmp_path / "screens"
     screens.mkdir(exist_ok=True)
     (screens / "a.txt").write_bytes(b"AAA\r\n")
@@ -92,6 +96,8 @@ def make_logon(app, tmp_path, sequence):
     logon = LogonPlugin()
     logon.on_load(app)
     logon.screens_dir = screens
+    if getattr(app, "screens", None) is not None:
+        app.screens.plugin_screens_dir = lambda plugin: screens
     return logon
 
 
@@ -219,7 +225,9 @@ def test_sequencer_missing_screen_step_is_graceful(tmp_path):
 
     assert len(hits) == 1
     assert hits[0]["step"] == "screen:no_such.txt"
-    assert hits[0]["result"] == "missing"
+    # The screen service renders a visible "[missing screen: …]" placeholder
+    # for missing files (fail-obvious, not fail-silent); the step still runs.
+    assert hits[0]["result"] == "displayed"
 
 
 def test_sequencer_preserves_crlf_in_screen_bytes(tmp_path):

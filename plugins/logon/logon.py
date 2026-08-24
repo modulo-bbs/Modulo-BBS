@@ -108,17 +108,27 @@ class LogonPlugin(Plugin):
     # -- steps -----------------------------------------------------------------
 
     async def _run_screen(self, session, filename: str):
-        """Display ``screens/<filename>`` with no input."""
-        path = self.screens_dir / filename
+        """Display a logon screen via the core screen service.
+
+        The service resolves the best existing variant (``.ans`` > ``.asc``
+        > ``.txt``) from ``screens/`` and substitutes tokens ({NODE},
+        {NAME}, {ACTIVE}, {BRIGHT_CYAN} …).
+        """
+        stem = filename.rsplit(".", 1)[0]
+        svc = getattr(self.bbs, "screens", None)
+        if svc is not None:
+            await svc.send(session, self.name, stem, **self._placeholders(session))
+            self._emit(session, f"screen:{filename}", "displayed")
+            return
+        # Fallback (service unavailable): legacy direct read.
+        path = SCREENS_DIR / filename
         if not path.is_file():
-            logger.warning("logon screen %r not found in %s", filename, self.screens_dir)
+            logger.warning("logon screen %r not found in %s", filename, SCREENS_DIR)
             self._emit(session, f"screen:{filename}", "missing")
             return
-        # Read bytes and decode manually so CRLF line endings survive
-        # (Path.read_text() collapses CRLF -> LF, causing staircase wrapping
-        # in SyncTERM); then substitute ANSI + runtime placeholders.
-        text = path.read_bytes().decode("utf-8")
+        text = path.read_bytes().decode("utf-8", errors="replace")
         from core import banner as _banner
+
         text = _banner.substitute_tokens(text, **self._placeholders(session))
         await self.bbs.send(session, text)
         self._emit(session, f"screen:{filename}", "displayed")

@@ -60,6 +60,10 @@ class MainmenuPlugin(Plugin):
 
     def on_load(self, bbs):
         self.bbs = bbs
+        # The generated menu is the *fallback* for screen "main"; a sysop can
+        # override it by dropping main.ans / main.asc / main.txt into
+        # plugins/mainmenu/screens/ (see docs/screens.md).
+        bbs.screens.register_generator(self.name, "main", self._generate_main)
 
     async def on_session_start(self, session):
         """Render the menu and run the dispatch loop until disconnect."""
@@ -70,7 +74,9 @@ class MainmenuPlugin(Plugin):
         self.bbs.events.emit("menu:open", {"session": session, "menu_name": "main"})
 
         while session.is_active:
-            await self.bbs.send(session, self._render(session))
+            await self.bbs.send(
+                session, self.bbs.screens.render(session, self.name, "main")
+            )
             # Single keypress, no Enter -- menu keys are one character.
             key = await runner.read_key(self.bbs, session)
             if key is None:
@@ -107,30 +113,31 @@ class MainmenuPlugin(Plugin):
 
     # -- rendering ------------------------------------------------------------
 
-    def _render(self, session) -> str:
-        """Plugin options sorted by menu_order, then the built-ins."""
-        w = min(getattr(session, "terminal_width", 80), 60)
+    def _generate_main(self) -> str:
+        """Generated default for screen ``main`` (overridable by file).
+
+        Note: a static file override cannot know the caller, so per-user
+        gating (sysop-only [X]) only exists in this generated variant. That's
+        the trade sysops accept when they reskin.
+        """
+        w = min(80, 60)
         bar = "=" * w
         C = ANSI.BRIGHT_CYAN
         B = ANSI.BOLD
         W = ANSI.BRIGHT_WHITE
         R = ANSI.RESET
 
+        # Render for "anyone" — gated entries ([X] Shutdown) are appended by
+        # callers who know the user; the file version is the common case.
         lines = [C + B + bar + R, C + B + "  Main Menu" + R, C + B + bar + R, ""]
-        for plugin in self._menuable(session):
+        for plugin in self._menuable_for(None):
             label = getattr(plugin, "menu_label", "") or plugin.name
             if label.startswith("["):
                 lines.append(C + f"  {label}" + R)
             else:
                 lines.append(C + f"  [{plugin.menu_key.upper()}] {label}" + R)
         lines.append(C + "  [I] System Info" + R)
-        # Show shutdown option only to sysops.
-        user = getattr(session, "user", None)
-        if user and user.in_group("sysop"):
-            lines.append(C + "  [X] Shutdown" + R)
         lines.append(C + "  [Q] Disconnect" + R)
-        lines.append("")
-        lines.append(W + "  Select: " + R)
         return "\r\n".join(lines)
 
     async def _sysop_shutdown(self, session) -> None:

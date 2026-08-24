@@ -37,6 +37,11 @@ class BBSApp:
         # Per-plugin data directories: bbs.storage.dir("messageboard") ->
         # plugins/messageboard/data/ (created on demand).
         self.storage = PluginStorage()
+        # The screen service: named display files (.ans/.asc/.txt) with token
+        # substitution, shared by every plugin. See core/screens.py.
+        from core.screens import ScreenService
+
+        self.screen_service = ScreenService(self)
         # Reference to the running transport server (telnet/SSH). Set when
         # the server is constructed so ``send`` can reuse its transport logic.
         self.server: Any = None
@@ -52,6 +57,11 @@ class BBSApp:
     def users(self) -> UserManager:
         """Plugins manage accounts via ``bbs.users``."""
         return self.user_manager
+
+    @property
+    def screens(self):
+        """Plugins render named display files via ``bbs.screens``."""
+        return self.screen_service
 
     def get_plugin(self, name: str):
         """Return the first loaded plugin whose ``name`` is ``name`` or None."""

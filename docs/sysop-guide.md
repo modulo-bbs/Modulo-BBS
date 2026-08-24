@@ -92,6 +92,24 @@ Passwords are bcrypt-hashed. Minimum 6 characters. The server never stores plain
 
 ## Plugin Management
 
+### Customizing screens
+
+Every plugin's visible output is a **named screen** you can override with a
+file — no code, no restart. Drop a file into the plugin's `screens/` folder:
+
+```
+plugins/mainmenu/screens/main.asc     ← overrides the main menu
+screens/splash.ans                    ← CP437 art version of the logon splash
+```
+
+Resolution per name: `.ans` (CP437+ANSI) → `.asc` (plain ASCII) →
+`.txt` (shipped default). Delete your file to restore the default.
+
+Tokens (`{username}`, `{time}`, `{node}`, `{active}`, `{BRIGHT_CYAN}` …)
+work in any screen. Full vocabulary and rules: **`docs/screens.md`**.
+Each plugin's own `plugins/<name>/docs/README.md` lists its screen names,
+keys, config files, and data locations.
+
 ### Loading
 
 Plugins are discovered automatically: the loader scans `plugins/*/` and loads
