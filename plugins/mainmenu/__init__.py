@@ -108,6 +108,8 @@ class MainmenuPlugin(Plugin):
         while session.is_active:
             await self._show_menu(session)
             # Single keypress, no Enter -- menu keys are one character.
+            # PIM navigation is handled here; classic keys fall through to
+            # _handle().
             key = await runner.read_key(self.bbs, session)
             if key is None:
                 break
@@ -122,6 +124,9 @@ class MainmenuPlugin(Plugin):
                     break
                 line = ("/" + rest.strip("\r\n")).strip()
                 await handle_slash(self.bbs, session, line)
+                continue
+            # PIM tab/pane navigation (build-plan § Step 8)
+            if self._is_pim(session) and await self._handle_pim_key(session, key):
                 continue
             await self._handle(session, key)
 
@@ -221,6 +226,117 @@ class MainmenuPlugin(Plugin):
         lines.append(bot)
         lines.append("  ↑/↓ or 1/2/3 to switch tabs, Enter to open, Q to disconnect")
         return "\r\n".join(lines)
+
+    async def _handle_pim_key(self, session, key: str) -> bool:
+        """PIM navigation: tabs + pane highlight. Returns True if consumed.
+
+        Consumed keys re-render the chrome on the next loop; unhandled keys
+        fall through to classic ``_handle()`` (e.g. ``I`` for System Info).
+        """
+        tabs = visible_tabs(load_tabs(self.bbs), getattr(session, "user", None))
+        if not tabs:
+            return False
+        active_id = self._active_tab_id(session)
+        # normalize active
+        if not any(t["id"] == active_id for t in tabs):
+            active_id = tabs[0]["id"]
+        active_idx = next((i for i, t in enumerate(tabs) if t["id"] == active_id), 0)
+
+        # numeric tab switch: 1/2/3 → tab by order
+        if key in ("1", "2", "3", "4", "5"):
+            idx = int(key) - 1
+            if 0 <= idx < len(tabs):
+                session._pim_active_tab = tabs[idx]["id"]  # type: ignore[attr-defined]
+                session._pim_selected = 0  # type: ignore[attr-defined]
+                return True
+            return False
+
+        if key == "LEFT":
+            # vi H also handled via LEFT arrow; H key itself is LEFT
+            active_idx = (active_idx - 1) % len(tabs)
+            session._pim_active_tab = tabs[active_idx]["id"]  # type: ignore[attr-defined]
+            session._pim_selected = 0  # type: ignore[attr-defined]
+            return True
+        if key == "RIGHT":
+            active_idx = (active_idx + 1) % len(tabs)
+            session._pim_active_tab = tabs[active_idx]["id"]  # type: ignore[attr-defined]
+            session._pim_selected = 0  # type: ignore[attr-defined]
+            return True
+        # UP/DN move highlight inside pane
+        if key == "UP":
+            sel = getattr(session, "_pim_selected", 0)
+            session._pim_selected = max(0, sel - 1)  # type: ignore[attr-defined]
+            return True
+        if key == "DOWN":
+            # clamp to conv count for active tab
+            sel = getattr(session, "_pim_selected", 0)
+            # we don't know count without I/O here — allow free increment,
+            # _render_pane will clamp visually; next open will validate.
+            session._pim_selected = sel + 1  # type: ignore[attr-defined]
+            return True
+        if key == "ENTER":
+            await self._open_selected(session, tabs[active_idx])
+            return True
+        # H/L as vim left/right when not already consumed above
+        if key == "H":
+            active_idx = (active_idx - 1) % len(tabs)
+            session._pim_active_tab = tabs[active_idx]["id"]  # type: ignore[attr-defined]
+            session._pim_selected = 0  # type: ignore[attr-defined]
+            return True
+        if key == "L":
+            active_idx = (active_idx + 1) % len(tabs)
+            session._pim_active_tab = tabs[active_idx]["id"]  # type: ignore[attr-defined]
+            session._pim_selected = 0  # type: ignore[attr-defined]
+            return True
+        if key in ("K",):
+            sel = getattr(session, "_pim_selected", 0)
+            session._pim_selected = max(0, sel - 1)  # type: ignore[attr-defined]
+            return True
+        if key in ("J",):
+            sel = getattr(session, "_pim_selected", 0)
+            session._pim_selected = sel + 1  # type: ignore[attr-defined]
+            return True
+        return False
+
+    async def _open_selected(self, session, tab: dict) -> None:
+        """Open the highlighted conversation in a full-screen reader.
+
+        Minimal for Step 8: show messages in the conversation, paged.
+        Full editor with threading/quote/reply lands in Step 9.
+        """
+        kind = tab.get("kind", "board")
+        filter_kind = None if kind == "all" else kind
+        try:
+            convs = await self.bbs.conversations.list_conversations(
+                kind=filter_kind, visible_to=getattr(session, "user", None)
+            )
+        except Exception:
+            convs = []
+        if not convs:
+            await self.bbs.send(session, "\r\n(no conversations in this tab)\r\n")
+            await self.bbs.send(session, "\r\n[Press any key]\r\n")
+            await runner.read_key(self.bbs, session)
+            return
+        sel = getattr(session, "_pim_selected", 0)
+        sel = max(0, min(sel, len(convs) - 1))
+        conv = convs[sel]
+        try:
+            msgs = await self.bbs.conversations.list_messages(conv["id"])
+        except Exception:
+            msgs = []
+        await self.bbs.send(session, "\x1b[2J\x1b[H")
+        header = f" {conv.get('title','?')} — {len(msgs)} messages  (Q to go back)"
+        await self.bbs.send(session, header + "\r\n" + "─" * 79 + "\r\n")
+        if not msgs:
+            await self.bbs.send(session, "(no messages yet — be the first to post)\r\n")
+        else:
+            for m in msgs[-20:]:  # last 20 in pane-height friendly slice
+                author = m.get("author", "?")
+                body = (m.get("body", "") or "").split("\n")[0][:70]
+                line = f"[{author}] {body}"
+                await self.bbs.send(session, line + "\r\n")
+        await self.bbs.send(session, "\r\n[Press any key]\r\n")
+        await runner.read_key(self.bbs, session)
 
     async def _show_menu(self, session) -> None:
         """Clear screen, render the home surface, show a bottom-aligned ``>`` prompt.

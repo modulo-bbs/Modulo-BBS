@@ -134,12 +134,36 @@ async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
     """Read a SINGLE keypress (no Enter) for hotkey menus.
 
     Returns the first printable, non-whitespace character (uppercased), or
-    ``None`` on EOF/timeout. Bytes typed after the key are stashed in
-    ``_line_buffer`` for the next read. Does not echo (see module docstring).
+    ``None`` on EOF/timeout. Arrow keys are normalized to ``UP``/``DOWN``/
+    ``LEFT``/``RIGHT``; Enter (CR/LF) is ``ENTER``. Bytes typed after the
+    key are stashed in ``_line_buffer`` for the next read. Does not echo
+    (see module docstring).
     """
     # Serve a printable char from any stash first.
     buf = getattr(session, "_line_buffer", "")
     while buf:
+        # Check for stashed arrow/enter sequences first
+        if buf.startswith("\x1b["):
+            if len(buf) >= 3:
+                seq = buf[:3]
+                rest = buf[3:]
+                session._line_buffer = rest
+                if seq == "\x1b[A":
+                    return "UP"
+                if seq == "\x1b[B":
+                    return "DOWN"
+                if seq == "\x1b[C":
+                    return "RIGHT"
+                if seq == "\x1b[D":
+                    return "LEFT"
+                # unknown ESC sequence: skip
+                continue
+            else:
+                # incomplete — wait for more bytes
+                break
+        if buf[0] in ("\r", "\n"):
+            session._line_buffer = buf[1:]
+            return "ENTER"
         ch, buf = buf[0], buf[1:]
         session._line_buffer = buf
         if ch.isprintable() and not ch.isspace():
@@ -149,9 +173,37 @@ async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
         chunk = await _read_chunk(bbs, session, timeout)
         if chunk is None:
             return None
-        for i, ch in enumerate(chunk):
+        # Prepend to stash and re-decode via the same logic above so
+        # arrow sequences that arrived split across chunks still work.
+        buf = getattr(session, "_line_buffer", "") + chunk
+        session._line_buffer = buf
+        # Try to consume one key from the stashed buf
+        buf = session._line_buffer
+        if buf.startswith("\x1b["):
+            if len(buf) >= 3:
+                seq = buf[:3]
+                session._line_buffer = buf[3:]
+                if seq == "\x1b[A":
+                    return "UP"
+                if seq == "\x1b[B":
+                    return "DOWN"
+                if seq == "\x1b[C":
+                    return "RIGHT"
+                if seq == "\x1b[D":
+                    return "LEFT"
+                continue
+            else:
+                # incomplete ESC — read more
+                continue
+        for i, ch in enumerate(buf):
+            if ch in ("\r", "\n"):
+                session._line_buffer = buf[i + 1 :]
+                return "ENTER"
+            if ch == "\x1b":
+                # start of an ESC sequence — wait for more
+                break
             if ch.isprintable() and not ch.isspace():
-                session._line_buffer = chunk[i + 1:]
+                session._line_buffer = buf[i + 1 :]
                 return ch.upper()
         # Pure control / whitespace: loop for a real key.
 
