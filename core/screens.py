@@ -83,8 +83,14 @@ class ScreenService:
 
     # -- registration ---------------------------------------------------------
 
-    def register_generator(self, plugin: str, name: str, fn: Callable[[], str]) -> None:
-        """Register the code fallback for screen ``<name>`` of ``<plugin>``."""
+    def register_generator(
+        self, plugin: str, name: str, fn: Callable[..., str]
+    ) -> None:
+        """Register the code fallback for screen ``<name>`` of ``<plugin>``.
+
+        ``fn`` may take zero args or one (the session); one-arg generators
+        can personalise their output (e.g. /screen permission filtering).
+        """
         self._generators[(plugin, name)] = fn
 
     def register_provider(self, provider: TokenProvider) -> None:
@@ -173,6 +179,22 @@ class ScreenService:
 
     # -- rendering ---------------------------------------------------------------
 
+    def render_default(self, session, plugin: str, name: str, **extra: object) -> str:
+        """Render the *generated* screen even when a sysop file override exists.
+
+        This is what ``/screen`` serves: the machine's own view of the
+        interface, filtered to the caller's permissions. Never reads files.
+        """
+        gen = self._generators.get((plugin, name))
+        if gen is None:
+            return f"[no generated screen: {plugin}/{name}]"
+        try:
+            text = gen(session)
+        except TypeError:
+            # Zero-arg generator.
+            text = gen()
+        return self.substitute(text, session, **extra)
+
     def render(self, session, plugin: str, name: str, **extra: object) -> str:
         """Render screen ``name`` of ``plugin`` for ``session``.
 
@@ -183,7 +205,13 @@ class ScreenService:
         text = self._load(session, plugin, name)
         if text is None:
             gen = self._generators.get((plugin, name))
-            text = gen() if gen else f"[missing screen: {plugin}/{name}]"
+            if gen is not None:
+                try:
+                    text = gen(session)
+                except TypeError:
+                    text = gen()
+            else:
+                text = f"[missing screen: {plugin}/{name}]"
         return self.substitute(text, session, **extra)
 
     async def send(self, session, plugin: str, name: str, **extra: object) -> None:

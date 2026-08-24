@@ -81,6 +81,18 @@ class MainmenuPlugin(Plugin):
             key = await runner.read_key(self.bbs, session)
             if key is None:
                 break
+            if key == "/":
+                # Slash command: collect the rest of the line and hand it to
+                # the shared dispatcher (/screen, /help, …).
+                await self.bbs.send(session, "/")
+                from core.slash import handle_slash
+
+                rest = await runner.read_command(self.bbs, session)
+                if rest is None:
+                    break
+                line = ("/" + rest.strip("\r\n")).strip()
+                await handle_slash(self.bbs, session, line)
+                continue
             await self._handle(session, key)
 
     # -- dispatch -------------------------------------------------------------
@@ -113,8 +125,12 @@ class MainmenuPlugin(Plugin):
 
     # -- rendering ------------------------------------------------------------
 
-    def _generate_main(self) -> str:
-        """Generated default for screen ``main`` (overridable by file)."""
+    def _generate_main(self, session=None) -> str:
+        """Generated default for screen ``main`` (overridable by file).
+
+        When called with a session (``/screen``), the listing is filtered to
+        the caller's permissions — sysops see [S]/[X], regular users don't.
+        """
         w = min(80, 60)
         bar = "=" * w
         C = ANSI.BRIGHT_CYAN
@@ -122,15 +138,17 @@ class MainmenuPlugin(Plugin):
         W = ANSI.BRIGHT_WHITE
         R = ANSI.RESET
 
+        user = getattr(session, "user", None) if session is not None else None
         lines = [C + B + bar + R, C + B + "  Main Menu" + R, C + B + bar + R, ""]
-        for plugin in self._menuable_for(None):
+        for plugin in self._menuable_for(user):
             label = getattr(plugin, "menu_label", "") or plugin.name
             if label.startswith("["):
                 lines.append(C + f"  {label}" + R)
             else:
                 lines.append(C + f"  [{plugin.menu_key.upper()}] {label}" + R)
         lines.append(C + "  [I] System Info" + R)
-        lines.append(C + "  [X] Shutdown" + R)
+        if user is not None and user.in_group("sysop"):
+            lines.append(C + "  [X] Shutdown" + R)
         lines.append(C + "  [Q] Disconnect" + R)
         return "\r\n".join(lines)
 

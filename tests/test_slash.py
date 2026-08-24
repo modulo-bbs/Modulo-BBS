@@ -1,0 +1,137 @@
+"""Tests for core/slash.py — /screen and the shared slash dispatcher."""
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+import pytest
+
+from core.app import BBSApp
+from server.session import Session
+
+
+@pytest.fixture
+def app(tmp_path):
+    a = BBSApp(users_dir=tmp_path / "users")
+    a.screens.plugins_root = tmp_path
+    return a
+
+
+class FakeWriter:
+    def __init__(self):
+        self.buffer = bytearray()
+
+    def write(self, d):
+        self.buffer.extend(d)
+
+    async def drain(self):
+        pass
+
+    def is_closing(self):
+        return False
+
+
+def make_session():
+    s = Session(session_id="t", node_id=1, address=("h", 1))
+    s.writer = FakeWriter()
+    return s
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+def text_of(session) -> str:
+    return bytes(session.writer.buffer).decode("utf-8", errors="replace")
+
+
+class TestScreenCommand:
+    def test_screen_shows_generated_menu(self, app):
+        app.screens.register_generator("mainmenu", "main", lambda session=None: "MENU BODY")
+        s = make_session()
+        run(app.screens and None or asyncio.sleep(0))  # noop to settle loop style
+
+        from core.slash import handle_slash
+
+        async def scenario():
+            await handle_slash(app, s, "/screen")
+
+        run(scenario())
+        out = text_of(s)
+        assert "MENU BODY" in out
+        assert "generated defaults" in out
+
+    def test_screen_filters_by_permission(self, app, tmp_path):
+        """Sysop sees [X]; regular user does not."""
+        from plugins.mainmenu import MainmenuPlugin
+
+        plugin = MainmenuPlugin()
+        plugin.on_load(app)
+
+        sysop = make_session()
+        sysop.user = _user_with(["sysop"])
+        run(_drive(app, sysop, "/screen"))
+        assert "[X] Shutdown" in text_of(sysop)
+
+        pleb = make_session()
+        pleb.user = _user_with(["user"])
+        run(_drive(app, pleb, "/screen"))
+        assert "[X] Shutdown" not in text_of(pleb)
+
+    def test_screen_beats_file_override(self, app, tmp_path):
+        """Even with an override file installed, /screen shows generated."""
+        d = tmp_path / "plugins" / "mainmenu" / "screens"
+        d.mkdir(parents=True)
+        (d / "main.txt").write_bytes(b"FANCY SKIN")
+
+        from plugins.mainmenu import MainmenuPlugin
+
+        MainmenuPlugin().on_load(app)
+
+        # Normal render -> file wins.
+        assert "FANCY SKIN" in app.screens.render(None, "mainmenu", "main")
+        # /screen -> generated wins.
+        s = make_session()
+        run(_drive(app, s, "/screen mainmenu main"))
+        assert "FANCY SKIN" not in text_of(s)
+
+    def test_unknown_slash_gets_hint(self, app):
+        s = make_session()
+        run(_drive(app, s, "/bogus"))
+        assert "Unknown command" in text_of(s)
+
+
+class TestRegistry:
+    def test_plugin_can_register_command(self, app):
+        from core import slash
+
+        hits = []
+
+        async def handler(bbs, session, arg):
+            hits.append(arg)
+            await bbs.send(session, "did it")
+
+        slash.register("demo", handler)
+        s = make_session()
+
+        async def scenario():
+            await slash.handle_slash(app, s, "/demo stuff")
+
+        asyncio.run(scenario())
+        assert hits == ["stuff"]
+        assert "did it" in text_of(s)
+
+
+# -- helpers ---------------------------------------------------------------
+
+
+async def _drive(app, session, line):
+    from core.slash import handle_slash
+
+    await handle_slash(app, session, line)
+
+
+def _user_with(groups):
+    from core.user import User
+
+    return User(username="t", groups=groups)
