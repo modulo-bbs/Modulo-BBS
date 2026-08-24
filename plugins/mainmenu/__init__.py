@@ -100,30 +100,32 @@ class MainmenuPlugin(Plugin):
 
         The prompt always appears regardless of whether the screen came from
         a file override or the generated fallback — it is rendered here, not
-        baked into either source.
+        baked into either source.  The prompt sits on the terminal's last
+        line via ANSI cursor positioning so backspace cannot dislodge it,
+        and subsequent redraws overprint rather than flash-clear.
         """
         h = getattr(session, "terminal_height", 24)
+        w = getattr(session, "terminal_width", 80)
 
-        # ANSI clear screen + home cursor.
-        await self.bbs.send(session, "\x1b[2J\x1b[H")
+        # First render: full clear.  Subsequent redraws: just home the cursor
+        # and overprint — avoids the flash that makes keystrokes look lost.
+        if not getattr(session, "_menu_drawn", False):
+            await self.bbs.send(session, "\x1b[2J\x1b[H")
+            session._menu_drawn = True
+        else:
+            await self.bbs.send(session, "\x1b[H")
 
         # Screen content (file or generator).
         screen = self.bbs.screens.render(session, self.name, "main")
         await self.bbs.send(session, screen)
 
-        # Count visible lines to align the prompt on the bottom row.
-        from shared.codecs import _ANSI_RE
-
-        clean = _ANSI_RE.sub("", screen)
-        lines_used = clean.count("\r\n") + 1
-        pad = max(0, h - lines_used - 1)
-        if pad:
-            await self.bbs.send(session, "\r\n" * pad)
-
-        # Green ``>`` prompt on the bottom line.
+        # Erase any leftover lines from a previous longer render, then pin
+        # the green ``>`` prompt on the very last terminal line.
         G = ANSI.BRIGHT_GREEN
         R = ANSI.RESET
-        await self.bbs.send(session, f"\r\n{G}  >{R}")
+        await self.bbs.send(session, f"\x1b[{h};1H")   # last row
+        await self.bbs.send(session, f"\x1b[2K")        # clear that row
+        await self.bbs.send(session, f"{G}  >{R}")
 
     # -- dispatch -------------------------------------------------------------
 
