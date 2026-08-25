@@ -26,6 +26,10 @@ logger = logging.getLogger("modulo.core.runner")
 
 IDLE_TIMEOUT = 300  # seconds; a session idle this long is disconnected
 
+# B0 (boards-unification): how long read_key waits for the rest of an ESC
+# sequence before declaring the ESC a lone keypress ("back" on Social).
+ESC_KEY_WINDOW = 0.25  # seconds
+
 _ARROW_MAP = {
     "\x1b[A": "UP", "\x1b[B": "DOWN", "\x1b[C": "RIGHT", "\x1b[D": "LEFT",
     "\x1bOA": "UP", "\x1bOB": "DOWN", "\x1bOC": "RIGHT", "\x1bOD": "LEFT",
@@ -152,23 +156,32 @@ async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
 
     Returns the first printable, non-whitespace character (uppercased), or
     ``None`` on EOF/timeout. Arrow keys are normalized to ``UP``/``DOWN``/
-    ``LEFT``/``RIGHT``; Enter (CR/LF) is ``ENTER``. Bytes typed after the
-    key are stashed in ``_line_buffer`` for the next read. Does not echo
-    (see module docstring).
+    ``LEFT``/``RIGHT``; Enter (CR/LF) is ``ENTER``. A bare ESC with no
+    follow-up byte within :data:`ESC_KEY_WINDOW` returns ``"ESC"`` (B0:
+    Social's back key); a fast-following byte still parses as its sequence.
+    Bytes typed after the key are stashed in ``_line_buffer`` for the next
+    read. Does not echo (see module docstring).
     """
     # Serve a printable char from any stash first.
     buf = getattr(session, "_line_buffer", "")
+    pending_esc = False
     while buf:
         # Check for stashed arrow/enter sequences first (both ESC[ and ESCO)
         r = _try_arrow(buf)
         if r is None:
-            break  # incomplete ESC — wait for more bytes
+            pending_esc = True  # incomplete ESC — wait, but only briefly
+            break
         if r is not False:
             key, rest = r
             session._line_buffer = rest
             if key == "__SKIP__":
                 continue
             return key
+        if buf[0] == "\x1b":
+            # Unrecognized ESC-led bytes (not [ or O): give the terminal a
+            # window to complete the sequence; silence means lone ESC (B0).
+            pending_esc = True
+            break
         if buf[0] in ("\r", "\n"):
             session._line_buffer = buf[1:]
             return "ENTER"
@@ -178,9 +191,24 @@ async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
             return ch.upper()
 
     while True:
-        chunk = await _read_chunk(bbs, session, timeout)
-        if chunk is None:
-            return None
+        if pending_esc:
+            # B0: an ESC arrived alone. Give the rest of the sequence a
+            # short window to show up; on silence (or EOF) hand back
+            # "ESC". The outer wait_for fires long before _read_chunk's
+            # idle timeout, so the idle machinery is never triggered.
+            try:
+                chunk = await asyncio.wait_for(
+                    _read_chunk(bbs, session, timeout), timeout=ESC_KEY_WINDOW
+                )
+            except asyncio.TimeoutError:
+                chunk = None
+            if chunk is None:
+                session._line_buffer = buf[1:]
+                return "ESC"
+        else:
+            chunk = await _read_chunk(bbs, session, timeout)
+            if chunk is None:
+                return None
         # Prepend to stash and re-decode via the same logic above so
         # arrow sequences that arrived split across chunks still work.
         buf = getattr(session, "_line_buffer", "") + chunk
@@ -189,7 +217,9 @@ async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
         buf = session._line_buffer
         r = _try_arrow(buf)
         if r is None:
-            continue  # incomplete ESC — read more
+            pending_esc = True  # incomplete ESC — read more, briefly
+            continue
+        pending_esc = False
         if r is not False:
             key, rest = r
             session._line_buffer = rest
@@ -201,7 +231,9 @@ async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
                 session._line_buffer = buf[i + 1 :]
                 return "ENTER"
             if ch == "\x1b":
-                # start of an ESC sequence — wait for more
+                # start of an ESC sequence — wait, but only briefly
+                # (B0: silence resolves to a lone "ESC" keypress)
+                pending_esc = True
                 break
             if ch.isprintable() and not ch.isspace():
                 session._line_buffer = buf[i + 1 :]
