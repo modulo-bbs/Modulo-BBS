@@ -292,9 +292,9 @@ class MainmenuPlugin(Plugin):
                 # elide names to fit
                 prefix = f"DMs: ({len(dms)} new) from "
                 text = _elided(prefix, names, sep=", ", width=74)
-                digests.append((text, "dms"))
+                digests.append((text, "social"))
             else:
-                digests.append(("DMs: (no new messages)", "dms"))
+                digests.append(("DMs: (no new messages)", "social"))
             # Bulletins
             try:
                 bul = self.bbs.get_plugin("bulletins")
@@ -347,9 +347,9 @@ class MainmenuPlugin(Plugin):
                 titles = [c.get("title", c.get("id","?")) for c in boards[:8]]
                 prefix = f"Boards: ({len(boards)} new) "
                 text = _elided(prefix, titles, sep=" | ", width=74)
-                digests.append((text, "boards"))
+                digests.append((text, "social"))
             else:
-                digests.append(("Boards: (no new)", "boards"))
+                digests.append(("Boards: (no new)", "social"))
             # Render digests inside the same box chrome
             # dynamic top: slashes follow tab ' | ' delimiters, hint is arrows+WASD on ANSI, WASD on plain
             is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")

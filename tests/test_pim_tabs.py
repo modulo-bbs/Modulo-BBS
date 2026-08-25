@@ -19,10 +19,11 @@ def test_default_tabs_load(tmp_path):
     app = _app(tmp_path)
     tabs = load_tabs(app)
     assert len(tabs) == len(DEFAULT_TABS)
-    assert tabs[0]["id"] == "dashboard"
+    assert [t["id"] for t in tabs] == ["dashboard", "social", "files", "bulletins"]
     assert tabs[0]["key"] == "1"
-    assert tabs[1]["id"] == "boards"
-    assert tabs[1]["key"] == "2"
+    assert tabs[1]["id"] == "social" and tabs[1]["key"] == "2"
+    # B5: Boards and DMs are gone as tabs — DMs live inside Social (OQ2).
+    assert all(t["id"] not in ("boards", "dms") for t in tabs)
 
 
 def test_visible_tabs_gating():

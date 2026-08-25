@@ -1,7 +1,8 @@
-"""PIM input routing (build-plan § Step 8): tabs + pane highlight."""
+"""PIM input routing (build-plan Step 8 + boards-unification B5): tabs + pane."""
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 from core.app import BBSApp
@@ -57,21 +58,18 @@ def test_tab_switch_numeric_and_arrows(tmp_path):
     assert p is not None
 
     async def _a():
-        # Seed two board conversations so tabs have something to scope
+        # Seed two board conversations so the Social sidebar has content
         await app.conversations.create_conversation(kind="board", title="General", created_by="dave", conv_id="general")
         await app.conversations.create_conversation(kind="board", title="Tech", created_by="dave", conv_id="tech")
-        # start on boards (explicit, since default is now dashboard)
-        s._pim_active_tab = "boards"
-        assert p._active_tab_id(s) == "boards"  # type: ignore[attr-defined]
-        # RIGHT → DMs (boards is 2, dms is 3)
+        # default tab is dashboard; RIGHT lands on Social (B5 tab row)
         assert await p._handle_pim_key(s, "RIGHT") is True  # type: ignore[attr-defined]
-        assert s._pim_active_tab == "dms"  # type: ignore[attr-defined]
-        # LEFT → back to Boards
+        assert s._pim_active_tab == "social"  # type: ignore[attr-defined]
+        # LEFT steps back to Dashboard (social is tab 2 of 4)
         assert await p._handle_pim_key(s, "LEFT") is True  # type: ignore[attr-defined]
-        assert s._pim_active_tab == "boards"  # type: ignore[attr-defined]
-        # Numeric 3 → DMs (1=dashboard, 2=boards, 3=dms)
-        assert await p._handle_pim_key(s, "3") is True  # type: ignore[attr-defined]
-        assert s._pim_active_tab == "dms"  # type: ignore[attr-defined]
+        assert s._pim_active_tab == "dashboard"  # type: ignore[attr-defined]
+        # Numeric 2 → Social
+        assert await p._handle_pim_key(s, "2") is True  # type: ignore[attr-defined]
+        assert s._pim_active_tab == "social"  # type: ignore[attr-defined]
         # invalid numeric ignored
         assert await p._handle_pim_key(s, "9") is False  # type: ignore[attr-defined]
 
@@ -114,6 +112,14 @@ def test_enter_opens_and_returns(tmp_path):
         await app.conversations.create_conversation(kind="board", title="General", created_by="dave", conv_id="general")
         await app.conversations.post_message("general", author="dave", body="hello")
         s._pim_selected = 0  # type: ignore[attr-defined]
+        # The classic full-screen reader is reachable from a conversation-
+        # listing tab; defaults no longer include one, so simulate a sysop
+        # tabs.json override with a boards branch.
+        d = tmp_path / "plugins" / "mainmenu" / "data"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "tabs.json").write_text(json.dumps([
+            {"id": "boards", "label": "Boards", "kind": "board", "key": "2"},
+        ]))
         s._pim_active_tab = "boards"  # type: ignore[attr-defined]
         # Mock the "Press any key" pause so ENTER doesn't block
         import core.runner as runner

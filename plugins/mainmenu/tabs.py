@@ -14,11 +14,12 @@ from pathlib import Path
 
 DEFAULT_TABS: list[dict] = [
     {"id": "dashboard", "label": "Dashboard", "kind": "dashboard", "key": "1", "requires": []},
-    {"id": "boards", "label": "Boards", "kind": "board", "key": "2", "requires": []},
-    {"id": "dms", "label": "DMs", "kind": "dm", "key": "3", "requires": []},
-    {"id": "files", "label": "Files", "kind": "files", "key": "4", "requires": []},
-    {"id": "bulletins", "label": "Bulletins", "kind": "bulletins", "key": "5", "requires": []},
+    {"id": "social", "label": "Social", "kind": "social", "key": "2", "requires": []},
+    {"id": "files", "label": "Files", "kind": "files", "key": "3", "requires": []},
+    {"id": "bulletins", "label": "Bulletins", "kind": "bulletins", "key": "4", "requires": []},
 ]
+# B5 (boards-unification): Boards + DMs tabs replaced by the composite
+# Social surface — DMs live as its pinned sidebar row (OQ2 resolved).
 
 # Keys reserved for tab switching — never used for board selection
 # inside the PIM (that uses up/dn + enter per build-plan § Risks).
@@ -31,7 +32,7 @@ def _validate_tab(t: dict) -> dict | None:
     for k in ("id", "label", "kind", "key"):
         if k not in t or not isinstance(t[k], str) or not t[k].strip():
             return None
-    if t["kind"] not in ("board", "channel", "dm", "group", "all", "dashboard", "files", "bulletins"):
+    if t["kind"] not in ("board", "channel", "dm", "group", "all", "dashboard", "files", "bulletins", "social"):
         return None
     req = t.get("requires", [])
     if not isinstance(req, list):
