@@ -119,58 +119,47 @@ def _hint_for_session(session) -> str:
 
 
 def _build_top(tab_bar_visible: str, hint: str, is_plain: bool, width: int = 77) -> str:
-    """Build the box top border where '/' and '\\' (or '┤'/'├') sit under tab ' | ' delimiters.
+    """Build the box top border with the slash marks under the tab ' | ' delimiters.
 
-    tab_bar_visible is the visible tab bar (no ANSI). We find pipe positions
-    (the '|' in ' | ') and place the left slash at the first pipe and the
-    right slash at the last pipe, with hint centered between them. Total inner
-    width is 77 between the '+'/'┌' and '+'/'┐'. CP437-safe.
+    The rendered line is ``+`` + inner(width) + ``+``, so ``inner[i]`` sits at
+    line index ``i+1``. A tab delimiter whose ``|`` is at line index ``p``
+    must therefore land at ``inner[p-1]`` — this was the off-by-one that put
+    the slashes one column right of the pipes.
     """
-    # find pipe positions in tab_bar_visible
     pipes = []
     idx = tab_bar_visible.find(" | ")
     while idx != -1:
-        pipes.append(idx + 1)  # position of '|' within tab bar
+        pipes.append(idx + 1)  # line index of the '|' character
         idx = tab_bar_visible.find(" | ", idx + 3)
     if not pipes:
-        # no delimiters (single tab) — fallback to centered hint at fixed 20
-        left = 20
-        right = left + len(hint) + 1
+        # single tab: centered hint, slashes just outside it
+        mid = width // 2
+        left_in = max(0, mid - len(hint) // 2 - 1)
+        right_in = min(width - 1, left_in + len(hint) + 1)
     else:
-        left = pipes[0]
-        right = pipes[-1]
-        # clamp to inner width
-        left = max(0, min(left, width - len(hint) - 2))
-        right = min(width - 1, max(right, left + len(hint) + 1))
-        # if hint doesn't fit between left and right, expand to fit
-        if right - left - 1 < len(hint):
-            # center hint, slashes just outside it
-            center = width // 2
-            left = max(0, center - len(hint)//2 - 1)
-            right = min(width - 1, left + len(hint) + 1)
-    # build inner
+        left_in = max(0, pipes[0] - 1)   # -1: inner[i] is line index i+1
+        right_in = min(width - 1, max(pipes[-1] - 1, left_in + len(hint) + 1))
+        if right_in - left_in - 1 < len(hint):
+            # hint would not fit between the outer delimiters: center it
+            mid = width // 2
+            left_in = max(0, mid - len(hint) // 2 - 1)
+            right_in = min(width - 1, left_in + len(hint) + 1)
     inner = ["-"] * width if is_plain else ["─"] * width
-    # place slashes/chars
-    if is_plain:
-        inner[left] = "/"
-        inner[right] = "\\"
-    else:
-        inner[left] = "┤"
-        inner[right] = "├"
-    # place hint centered between slashes (or centered in width if no pipes)
-    if pipes and right - left - 1 >= len(hint):
-        start = left + 1 + (right - left - 1 - len(hint)) // 2
+    inner[left_in] = "/" if is_plain else "┤"
+    inner[right_in] = "\\" if is_plain else "├"
+    gap = right_in - left_in - 1
+    if gap >= len(hint):
+        start = left_in + 1 + (gap - len(hint)) // 2
     else:
         start = (width - len(hint)) // 2
     for i, ch in enumerate(hint):
         pos = start + i
         if 0 <= pos < width and inner[pos] in ("-", "─"):
             inner[pos] = ch
-    # wrap with box ends
     if is_plain:
         return "+" + "".join(inner) + "+"
-    else:
-        return f"{ANSI.DIM}┌{''.join(inner)}┐{ANSI.RESET}"
+    return f"{ANSI.DIM}┌{''.join(inner)}┐{ANSI.RESET}"
+
 
 
 # Session state (guarded so this module imports standalone too).
@@ -403,7 +392,7 @@ class MainmenuPlugin(Plugin):
                     row = f"│  {disp} │"
                 lines.append(row)
             lines.append(bot)
-            lines.append("  Up/Dn or 1/2/3 to switch tabs, Enter to open, Q to disconnect")
+            lines.append("  Arrows/WASD or 1/2/3 to switch tabs, Enter to open, Q to disconnect")
             # stash target map for Enter handler
             try:
                 session._pim_dashboard_targets = [t for _, t in digests]
@@ -475,7 +464,7 @@ class MainmenuPlugin(Plugin):
                     row = f"│  {preview[:74].ljust(74)} │"
                 lines.append(row)
         lines.append(bot)
-        lines.append("  Up/Dn or 1/2/3 to switch tabs, Enter to open, Q to disconnect")
+        lines.append("  Arrows/WASD or 1/2/3 to switch tabs, Enter to open, Q to disconnect")
         return "\r\n".join(lines)
 
     async def _handle_pim_key(self, session, key: str) -> bool:

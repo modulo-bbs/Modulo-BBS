@@ -183,7 +183,15 @@ class TelnetNegotiator:
         if cmd == WILL:
             # Remote wants to enable an option
             if option in self._supported_will():
+                already = self.remote_options.get(option) is True
                 self.remote_options[option] = True
+                if option == OPT_TERMINAL_TYPE and not already:
+                    # RFC 1091: after agreeing to the client's WILL
+                    # TERMINAL-TYPE, the server must send SB TERMINAL-TYPE
+                    # SEND to actually request the name. Without this,
+                    # SyncTERM never reveals "ANSI-BBS" and the session
+                    # stays UNKNOWN (plain fallback forever).
+                    return bytes([IAC, DO, option]) + self.send_terminal_type_request()
                 return bytes([IAC, DO, option])
             else:
                 return bytes([IAC, DONT, option])
@@ -247,6 +255,14 @@ class TelnetNegotiator:
     def request_terminal_type(self) -> bytes:
         """Send DO TERMINAL-TYPE to request terminal type."""
         return bytes([IAC, DO, OPT_TERMINAL_TYPE])
+
+    def send_terminal_type_request(self) -> bytes:
+        """Send SB TERMINAL-TYPE SEND (RFC 1091) to ask for the name.
+
+        The client answers with SB TERMINAL-TYPE IS "<name>" which
+        _handle_subneg stores as ``self.terminal_type``.
+        """
+        return bytes([IAC, SB, OPT_TERMINAL_TYPE, 1, IAC, SE])
     
     def suppress_go_ahead(self) -> bytes:
         """Send WILL SUPPRESS-GO-AHEAD."""

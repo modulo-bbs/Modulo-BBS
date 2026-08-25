@@ -72,6 +72,25 @@ def test_pim_shows_tabs_and_pane(tmp_path):
     assert "Boards" in text
     # pane border + hint (now WASD on plain, arrows+WASD on CP437/ANSI)
     assert "select" in text.lower()
+
+    # top border: slashes must sit under the tab bar's first/last ' | '
+    import re as _re
+    def _vis(line: str) -> str:
+        return _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line)
+    tab_line = _vis(next(l for l in text.splitlines() if "Dashboard" in l))
+    pipes = [i for i, ch in enumerate(tab_line) if ch == "|"]
+    assert pipes, "tab bar has no delimiters"
+    top_line = next(l for l in text.splitlines() if "select" in l)
+    stripped = top_line.replace("\x1b[2m", "").replace("\x1b[0m", "")
+    # The real requirement: a marker (slash/T-piece, any codec) sits exactly
+    # at each pipe column — not a dash. Glyph identity varies with the
+    # writer's codec round-trip, so match on "not a filler".
+    assert len(stripped) > max(pipes), "top border shorter than tab bar"
+    markers = [p for p in pipes if stripped[p] not in "─-"]
+    assert markers == pipes, (
+        f"markers at {markers} but pipes at {pipes}; "
+        f"chars: {[stripped[p] for p in pipes]}"
+    )
     # pane content includes the seeded message preview
     assert "hello world" in text or "General" in text or "dave" in text
     # prompt is pinned at bottom (contains >)
