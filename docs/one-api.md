@@ -178,6 +178,7 @@ curl -s -X POST http://127.0.0.1:8080/api/v1/messages.find \
 **Common pitfalls:**
 - `participants` is `str` (`"dave"` or `"dave, ana"`), not `["dave"]` — the server splits on `,` and trims. See `core/opdefs.py:_conversations_create`.
 - `requires` for boards is also a comma-separated `str` of groups (`"sysop"` or `""` for public), not an array.
-- `kind` must be one of `board|channel|dm|group|dashboard|files|bulletins` per `plugins/mainmenu/tabs.py:DEFAULT_TABS`.
+- Board titles are capped at **15 chars** (`SOCIAL_THREAD_TITLE_MAX`) — they are Social sidebar rows; violations return 400. DM/channel/group titles are uncapped.
+- `kind` must be one of `board|channel|dm|group`; the PIM tab row is Dashboard | Social | Files | Bulletins per `plugins/mainmenu/tabs.py:DEFAULT_TABS` (Social = boards + pinned DMs composite).
 - Unauthenticated `_schema` on the public plane intentionally omits sysop-gated ops — log in to see the full management plane (loopback-only).
 

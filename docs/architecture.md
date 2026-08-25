@@ -78,15 +78,20 @@ There is no core menu module — the menu is just another plugin. In classic
 `menu_order`, and renders each plugin's `menu_label` / `menu_key`. In the
 default `home_mode=pim` (since 2026-08-24) it becomes the tabbed PIM home:
 top tabs (branches of one surface; see `plugins/mainmenu/tabs.py` +
-`docs/build-plan.md` Phase 1), middle pane (filtered `core/conversations.py`
-views — boards / DMs / Mentions), bottom `>` prompt. File `pim.*` beats the
-generated chrome; `preferences.home_mode` toggles classic vs PIM.
+`docs/build-plan.md` Phase 1), middle pane, bottom `>` prompt. Since the
+Boards→Social unification (2026-08-25) the default tab row is
+**Dashboard | Social | Files | Bulletins**: Social is a two-pane surface
+(room sidebar + live thread pane) that replaced the Boards tab and absorbed
+DMs as its pinned row; all reads/writes flow through `core/conversations.py`.
+File `pim.*` beats the generated chrome; `preferences.home_mode` toggles
+classic vs PIM.
 
-Classic board shape (when `home_mode=menu`; PIM replaces the list with tabs):
+Classic board shape (when `home_mode=menu`; PIM replaces the list with tabs;
+the [M] interactive flow is retired — messageboard only owns board
+definitions now):
 
 ```
 Main Menu
-├── [M] Message Boards   → plugin: messageboard   (menu_order 10)
 ├── [F] Files            → plugin: files
 ├── [B] Bulletins        → plugin: bulletins
 ├── [C] Chat             → plugin: chat
