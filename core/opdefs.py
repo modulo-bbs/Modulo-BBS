@@ -282,46 +282,64 @@ def _boards_list(bbs, user, params):
     return {"boards": [{"id": b["id"], "name": b["name"]} for b in visible]}
 
 
-def _boards_messages(bbs, user, params):
+async def _boards_messages(bbs, user, params):
+    """Board messages from the UNIFIED conversations store (A2 unification).
+
+    Group gates resolve from the conversation's ``requires`` (falling back to
+    the messageboard definition while a board is not yet migrated)."""
     plugin = _mb_plugin(bbs)
     board = next((b for b in plugin.boards if b["id"] == params["board"]), None)
-    if board is None:
+    conv = await bbs.conversations.get_conversation(params["board"])
+    reqs = (conv or {}).get("requires") or (board or {}).get("requires") or []
+    if board is None and conv is None:
         raise ValidationError(f"no such board: {params['board']}")
-    reqs = board.get("requires", [])
     if reqs and (user is None or not user.can_access(reqs)):
         raise PermissionDeniedError(f"board {params['board']} requires {reqs}")
-    msgs = plugin.store.list_messages(params["board"])
+    msgs = await bbs.conversations.list_messages(params["board"])
     return {"board": params["board"], "messages": msgs}
 
 
-def _boards_post(bbs, user, params):
+async def _boards_post(bbs, user, params):
     if user is None:
         raise PermissionDeniedError("login required to post")
     plugin = _mb_plugin(bbs)
     board = next((b for b in plugin.boards if b["id"] == params["board"]), None)
-    if board is None:
+    conv = await bbs.conversations.get_conversation(params["board"])
+    reqs = (conv or {}).get("requires") or (board or {}).get("requires") or []
+    if board is None and conv is None:
         raise ValidationError(f"no such board: {params['board']}")
-    reqs = board.get("requires", [])
     if reqs and not user.can_access(reqs):
         raise PermissionDeniedError(f"board {params['board']} requires {reqs}")
-    msg = plugin.store.add_message(
-        params["board"], user.username, params["subject"], params["body"]
-    )
+    # Subjects have no column in the unified engine — preserve them as the
+    # first body line (documented in docs/one-api.md).
+    body = params["body"] or ""
+    subject = (params.get("subject") or "").strip()
+    if subject:
+        body = f"{subject}\n\n{body}" if body else subject
+    msg = await bbs.conversations.post_message(params["board"], author=user.username, body=body)
     bbs.events.emit("messageboard:post", {"board": params["board"], "msg": msg})
     return msg
 
 
-def _boards_delete_message(bbs, user, params):
+async def _boards_delete_message(bbs, user, params):
     if user is None:
         raise PermissionDeniedError("login required")
     plugin = _mb_plugin(bbs)
-    msg = plugin.store.get_message(params["board"], params["id"])
-    if msg is None:
+    board = next((b for b in plugin.boards if b["id"] == params["board"]), None)
+    conv = await bbs.conversations.get_conversation(params["board"])
+    reqs = (conv or {}).get("requires") or (board or {}).get("requires") or []
+    if board is None and conv is None:
+        raise ValidationError(f"no such board: {params['board']}")
+    if reqs and not user.can_access(reqs):
+        raise PermissionDeniedError(f"board {params['board']} requires {reqs}")
+    try:
+        ok = await bbs.conversations.delete_message(
+            params["board"], params["id"], by_user=user
+        )
+    except PermissionError as e:
+        raise PermissionDeniedError(str(e))
+    if not ok:
         raise ValidationError(f"no such message #{params['id']} on {params['board']}")
-    is_own = msg.get("author") == user.username
-    if not (is_own or user.can_access(["moderator"])):
-        raise PermissionDeniedError("not your message and you are not a moderator")
-    plugin.store.delete_message(params["board"], params["id"])
     bbs.events.emit(
         "messageboard:delete",
         {"board": params["board"], "msg_id": params["id"], "by": user.username},

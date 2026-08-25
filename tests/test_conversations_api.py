@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from core.app import BBSApp
+from core.ops import PermissionDeniedError, ValidationError
 from core.user import User
 
 # Import opdefs to register ops
@@ -92,6 +93,101 @@ def test_conversations_schema_visible():
         "messages.find",
     ):
         assert expected in names, f"{expected} missing from schema"
+
+
+def _mb_stub(app, boards):
+    """Minimal messageboard plugin stand-in for boards.* op tests."""
+
+    class _Stub:
+        name = "messageboard"
+
+        def __init__(self, boards):
+            self.boards = boards
+
+        def visible_boards(self, user):
+            return [b for b in self.boards if user.can_access(b.get("requires", []))]
+
+    app.plugins.append(_Stub(boards))
+
+
+def test_boards_ops_write_unified_store(tmp_path):
+    """A2 unification: boards.post/messages/delete land in core/conversations
+    (One-API parity — same store the PIM Social surface reads)."""
+    app = _app(tmp_path)
+    _mb_stub(app, [{"id": "general", "name": "General Discussion", "requires": []}])
+    dave = _user("dave")
+    pleb = _user("pleb")
+
+    async def _a():
+        from core.ops import registry
+
+        # Boot migration guarantees defined boards exist as conversations;
+        # replicate that guarantee (handlers are strict on purpose).
+        await app.conversations.create_conversation(kind="board", title="General Discussion",
+                                                    created_by="system", conv_id="general")
+        # post via boards.op → readable via unified engine
+        res = await registry.call(app, pleb, "boards.post",
+                                  {"board": "general", "subject": "Hi", "body": "via API"})
+        msgs = await app.conversations.list_messages("general")
+        assert any("via API" in m["body"] for m in msgs)
+        assert any(m["author"] == "pleb" for m in msgs)
+        # subject is preserved as first body line
+        assert res["body"].startswith("Hi")
+        # boards.messages reads the SAME unified store
+        page = await registry.call(app, pleb, "boards.messages", {"board": "general"})
+        assert len(page["messages"]) == 1 and page["messages"][0]["body"].startswith("Hi")
+        # delete via boards.op works against unified store
+        await registry.call(app, pleb, "boards.delete_message",
+                            {"board": "general", "id": res["id"]})
+        assert await app.conversations.list_messages("general") == []
+
+    _run(_a())
+
+
+def test_boards_post_gates_and_events(tmp_path):
+    app = _app(tmp_path)
+    _mb_stub(app, [
+        {"id": "public", "name": "Public", "requires": []},
+        {"id": "private", "name": "Private", "requires": ["sysop"]},
+    ])
+    pleb = _user("pleb")
+
+    async def _a():
+        from core.ops import registry
+
+        # Boot migration guarantees defined boards exist as conversations;
+        # replicate that guarantee (handlers are strict on purpose).
+        await app.conversations.create_conversation(kind="board", title="Public",
+                                                    created_by="system", conv_id="public")
+        # anonymous cannot post
+        with pytest.raises(PermissionDeniedError):
+            await registry.call(app, None, "boards.post",
+                                {"board": "public", "subject": "x", "body": "y"})
+        # group gate enforced from unified conversation requires
+        conv = await app.conversations.get_conversation("private")
+        assert conv is None  # not created yet; create to prove gate uses conv requires
+        await app.conversations.create_conversation(kind="board", title="Private",
+                                                    created_by="system", conv_id="private",
+                                                    requires=["sysop"])
+        with pytest.raises(PermissionDeniedError):
+            await registry.call(app, pleb, "boards.post",
+                                {"board": "private", "subject": "x", "body": "y"})
+        # unknown board → validation error
+        with pytest.raises(ValidationError):
+            await registry.call(app, pleb, "boards.post",
+                                {"board": "nope", "subject": "x", "body": "y"})
+        # event still emitted on success (bus is async: give its task a tick)
+        seen = []
+        app.events.on("messageboard:post", lambda data: seen.append(data))
+        await registry.call(app, pleb, "boards.post",
+                            {"board": "public", "subject": "s", "body": "b"})
+        for _ in range(3):
+            if seen:
+                break
+            await asyncio.sleep(0)
+        assert len(seen) == 1
+
+    _run(_a())
 
 
 def test_dm_not_visible_to_outsider(tmp_path):
