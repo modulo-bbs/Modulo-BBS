@@ -43,6 +43,7 @@ class RegistrationFlow:
                 await tty.send(
                     f"{ANSI.BRIGHT_RED}Password cannot be empty.{ANSI.RESET}\r\n"
                 )
+                await tty.pause()
                 continue
             confirm = await tty.read_line("Confirm password: ")
             if password != confirm:
@@ -50,6 +51,7 @@ class RegistrationFlow:
                     f"{ANSI.BRIGHT_RED}Passwords do not match. Try again."
                     f"{ANSI.RESET}\r\n"
                 )
+                await tty.pause()
                 continue
 
             # That's the whole form. Display name, location, email etc. are
@@ -67,11 +69,13 @@ class RegistrationFlow:
                     f"{ANSI.BRIGHT_RED}That username is already taken."
                     f"{ANSI.RESET}\r\n"
                 )
+                await tty.pause()
                 continue
             except ValueError as exc:
                 await tty.send(
                     f"{ANSI.BRIGHT_RED}Invalid input: {exc}.{ANSI.RESET}\r\n"
                 )
+                await tty.pause()
                 continue
 
             self.bbs.events.emit("auth:register", {"session": session, "user": user})

@@ -294,7 +294,8 @@ def test_registration_creates_user_and_emits_event(tmp_path):
 def test_registration_password_mismatch_retries(tmp_path):
     bbs, totp, screens = _make_env(tmp_path)
     # mismatched confirm -> retry -> success on second attempt
-    s = make_session(inputs=["dave", "pw1", "pw2", "dave", "pw1", "pw1", "n"])
+    # ("" = the any-keypress the error pause now waits for)
+    s = make_session(inputs=["dave", "pw1", "pw2", "", "dave", "pw1", "pw1", "n"])
     registered = capture(bbs.events, "auth:register")
 
     result = run(RegistrationFlow(bbs, totp, screens).run(s))
@@ -309,7 +310,7 @@ def test_registration_rejects_duplicate_username(tmp_path):
     # first attempt fills a full form for "alice" (rejected because it exists),
     # then a second full form for "erin" succeeds.
     s = make_session(inputs=[
-        "alice", "x1", "x1",
+        "alice", "x1", "x1", "",
         "erin", "x1", "x1", "n",
     ])
     registered = capture(bbs.events, "auth:register")
@@ -325,7 +326,7 @@ def test_registration_validate_username(tmp_path):
     # uppercase / bad characters are rejected (full form consumed), then a
     # valid one ("frank") succeeds.
     s = make_session(inputs=[
-        "Bad Name!", "x", "x",
+        "Bad Name!", "x", "x", "",
         "frank", "x", "x", "n",
     ])
     registered = capture(bbs.events, "auth:register")

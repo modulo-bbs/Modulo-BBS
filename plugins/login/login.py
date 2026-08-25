@@ -128,6 +128,21 @@ class Terminal:
             return ""
         return text.strip("\r\n")
 
+    async def pause(self, msg: str = "[Press any key]") -> None:
+        """Show a message and wait for one keypress.
+
+        Error paths need this: the flow loops back to a full-screen
+        template, which would otherwise scroll the error off a 24-row
+        terminal before anyone can read it (Dave hit this 2026-08-25 —
+        "registration silently bounces back to Username").
+        """
+        from shared.telnet_protocol import ANSI
+
+        await self.send(f"{ANSI.DIM}{msg}{ANSI.RESET}\r\n")
+        from core import runner
+
+        await runner.read_key(self.bbs, self.session)
+
 
 # --- Login flow ---------------------------------------------------------------
 
@@ -182,6 +197,7 @@ class LoginFlow:
             await tty.send(
                 f"{ANSI.BRIGHT_RED}Invalid username or password.{ANSI.RESET}\r\n"
             )
+            await tty.pause()
             return False
 
         # Optional two-factor authentication (enforced only if enrolled).
@@ -196,6 +212,7 @@ class LoginFlow:
                 await tty.send(
                     f"{ANSI.BRIGHT_RED}Two-factor authentication failed.{ANSI.RESET}\r\n"
                 )
+                await tty.pause()
                 return False
 
         # Success: bind the user to the session and record the login.
