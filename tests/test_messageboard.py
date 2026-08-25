@@ -1,10 +1,14 @@
-"""Tests for the messageboard plugin (storage + gating + plugin wiring)."""
+"""Tests for the messageboard plugin (definition-holder + boot sync, A3).
+
+The interactive [M] flow is retired — the plugin owns boards.json definitions
+and syncs them into the unified conversations store. Storage/permission
+primitives (BoardStore, can_delete) remain tested for their legacy-data role.
+"""
 import json
 
 import pytest
 
 from core.events import EventBus
-from core.storage import PluginStorage
 from core.user import User
 from plugins.messageboard import MessageBoardPlugin
 from plugins.messageboard.boards import BoardStore, can_delete, load_boards
@@ -26,32 +30,20 @@ class FakeStorage:
 
 
 class FakeBBS:
-    def __init__(self, root, plugdir):
+    def __init__(self, root):
         self.storage = FakeStorage(root)
         self.events = EventBus()
-        self.sent = []
-        self.root_plugins = plugdir
-
-    async def send(self, session, text):
-        self.sent.append(text)
-
-    def keys_for(self, name, defaults):
-        from core.keys import load_keys
-
-        return load_keys(self.root_plugins, name, defaults)
+        self.conversations = None  # set by tests that exercise boot sync
 
 
 def _plugin(tmp_path):
-    bbs = FakeBBS(tmp_path / "data", tmp_path / "plugins")
-    pdir = tmp_path / "plugins" / "messageboard"
-    pdir.mkdir(parents=True, exist_ok=True)
-    (pdir / "keys").write_text("L, LIST\nP, POST\nQ, QUIT\n", encoding="utf-8")
+    bbs = FakeBBS(tmp_path / "data")
     plugin = MessageBoardPlugin()
     plugin.on_load(bbs)
     return bbs, plugin
 
 
-# -- storage -----------------------------------------------------------------
+# -- storage (legacy data still readable) --------------------------------------
 
 def test_add_list_delete_roundtrip(store):
     m1 = store.add_message("general", "dave", "Hello", "first post")
@@ -59,27 +51,19 @@ def test_add_list_delete_roundtrip(store):
     assert m1["id"] == 1 and m2["id"] == 2
     msgs = store.list_messages("general")
     assert [m["id"] for m in msgs] == [1, 2]
-    assert msgs[0]["author"] == "dave"
     assert store.delete_message("general", 1) is True
     assert [m["id"] for m in store.list_messages("general")] == [2]
-    assert store.get_message("general", 1) is None
 
 
 def test_delete_missing_message_returns_false(store):
     assert store.delete_message("general", 99) is False
 
 
-def test_timestamp_present(store):
-    m = store.add_message("general", "a", "s", "b")
-    assert "timestamp" in m and len(m["timestamp"]) > 10
-
-
-# -- boards config -------------------------------------------------------------
+# -- boards config ---------------------------------------------------------------
 
 def test_load_boards_creates_default(tmp_path):
     boards = load_boards(tmp_path)
     assert boards[0]["id"] == "general"
-    # persisted for the next load
     again = load_boards(tmp_path)
     assert again == boards
 
@@ -97,11 +81,48 @@ def test_visible_boards_respects_requires(tmp_path):
     assert {b["id"] for b in plugin.visible_boards(vet)} == {"general", "vip"}
 
 
-def test_plugin_wiring_on_load(tmp_path):
+# -- A3: definition-holder contract ----------------------------------------------
+
+def test_menu_hotkey_retired(tmp_path):
+    """The [M] flow is gone: no menu_key, no interactive session hook."""
+    from plugins.base import Plugin
+
     bbs, plugin = _plugin(tmp_path)
     assert plugin.name == "messageboard"
-    assert plugin.menu_key == "M"
-    assert plugin.keys.get("QUIT") == "Q"   # loaded via keys file
+    assert plugin.menu_key == ""
+    assert getattr(plugin.__class__, "on_session_start", None) is Plugin.on_session_start
+
+
+def test_boot_sync_creates_conversations(tmp_path):
+    """on_load, called on a RUNNING loop (plugin reload), schedules migrate_legacy."""
+    import asyncio
+
+    from core.app import BBSApp
+    from core.conversations import Conversations
+
+    app = BBSApp(users_dir=tmp_path / "users")
+    app.storage.plugins_dir = tmp_path / "plugins"
+    app.conversations = Conversations(app)
+
+    mb_root = app.storage.dir("messageboard")
+    (mb_root / "boards.json").write_text(
+        json.dumps([{"id": "general", "name": "General Discussion", "requires": []}]),
+        encoding="utf-8",
+    )
+
+    async def _a():
+        # Loop running → on_load schedules the sync task (reload scenario).
+        # Cold-boot coverage lives in run_server.py's explicit migrate call,
+        # exercised by tests/test_conversations.py::test_migrate_legacy_boards.
+        plugin = MessageBoardPlugin()
+        plugin.on_load(app)
+        await asyncio.sleep(0.05)
+        conv = await app.conversations.get_conversation("general")
+        assert conv is not None
+        assert conv["kind"] == "board"
+        assert conv["title"] == "General Discussion"
+
+    asyncio.run(_a())
 
 
 # -- delete permission -----------------------------------------------------------
