@@ -48,6 +48,10 @@ class Conversations:
         # One lock per conversation id for message appends; plus a global
         # lock for index mutations.
         self._locks: dict[str, asyncio.Lock] = {}
+        # Serializes boot migration: plugin on_load fires migrate_legacy()
+        # as a task AND run_server.py awaits it — concurrent calls raced
+        # create_conversation (live incident 2026-08-25).
+        self._migrate_lock = asyncio.Lock()
         self._index_lock = asyncio.Lock()
         self._reads_lock = asyncio.Lock()
 
@@ -405,97 +409,98 @@ class Conversations:
         messageboard_root: Path | None = None,
         chat_history: list[dict[str, Any]] | None = None,
     ) -> dict[str, int]:
-        """Idempotent migration from old messageboard/chat storage.
+        async with self._migrate_lock:
+            """Idempotent migration from old messageboard/chat storage.
 
-        - messageboard: ``plugins/messageboard/data/<board_id>/*.json`` + ``boards.json``
-          → ``kind=board`` conversations.
-        - chat: optional list of ``{"author":..., "body":..., "created":...}`` dicts
-          → one ``kind=channel`` conversation titled ``Lobby``.
+            - messageboard: ``plugins/messageboard/data/<board_id>/*.json`` + ``boards.json``
+              → ``kind=board`` conversations.
+            - chat: optional list of ``{"author":..., "body":..., "created":...}`` dicts
+              → one ``kind=channel`` conversation titled ``Lobby``.
 
-        Returns counts ``{"boards": n, "channel_messages": m}``.
-        Safe to call repeatedly — skips conversations that already exist.
-        """
-        from pathlib import Path as _Path
+            Returns counts ``{"boards": n, "channel_messages": m}``.
+            Safe to call repeatedly — skips conversations that already exist.
+            """
+            from pathlib import Path as _Path
 
-        counts = {"boards": 0, "channel_messages": 0}
-        # Resolve messageboard root
-        if messageboard_root is None:
-            # default: sibling plugin's data dir
-            try:
-                messageboard_root = self.bbs.storage.dir("messageboard")
-            except Exception:
-                messageboard_root = None
-        if messageboard_root is not None:
-            messageboard_root = _Path(messageboard_root)
-            boards_json = messageboard_root / "boards.json"
-            boards: list[dict[str, Any]] = []
-            if boards_json.is_file():
+            counts = {"boards": 0, "channel_messages": 0}
+            # Resolve messageboard root
+            if messageboard_root is None:
+                # default: sibling plugin's data dir
                 try:
-                    boards = json.loads(boards_json.read_text(encoding="utf-8"))
+                    messageboard_root = self.bbs.storage.dir("messageboard")
                 except Exception:
-                    boards = []
-            if not boards:
-                # default board if none — mirrors boards.py default
-                boards = [{"id": "general", "name": "General Discussion", "requires": []}]
-            for board in boards:
-                bid = board.get("id", "general")
-                title = board.get("name", bid)
-                requires = board.get("requires") or []
-                # Create the conversation only if absent — but do NOT skip
-                # the board on that basis alone: a pre-existing conversation
-                # can still have stranded legacy messages (live incident
-                # 2026-08-25). Message copying is gated by a per-board
-                # .migrated marker instead of conv existence.
-                if await self.get_conversation(bid) is None:
+                    messageboard_root = None
+            if messageboard_root is not None:
+                messageboard_root = _Path(messageboard_root)
+                boards_json = messageboard_root / "boards.json"
+                boards: list[dict[str, Any]] = []
+                if boards_json.is_file():
+                    try:
+                        boards = json.loads(boards_json.read_text(encoding="utf-8"))
+                    except Exception:
+                        boards = []
+                if not boards:
+                    # default board if none — mirrors boards.py default
+                    boards = [{"id": "general", "name": "General Discussion", "requires": []}]
+                for board in boards:
+                    bid = board.get("id", "general")
+                    title = board.get("name", bid)
+                    requires = board.get("requires") or []
+                    # Create the conversation only if absent — but do NOT skip
+                    # the board on that basis alone: a pre-existing conversation
+                    # can still have stranded legacy messages (live incident
+                    # 2026-08-25). Message copying is gated by a per-board
+                    # .migrated marker instead of conv existence.
+                    if await self.get_conversation(bid) is None:
+                        await self.create_conversation(
+                            kind="board",
+                            title=title,
+                            created_by=board.get("created_by", "system"),
+                            requires=requires,
+                            conv_id=bid,
+                        )
+                        counts["boards"] += 1
+                    # migrate messages (marker-gated, idempotent across restarts)
+                    bdir = messageboard_root / bid
+                    if bdir.is_dir():
+                        marker = bdir / ".migrated"
+                        if not marker.is_file():
+                            for p in sorted(bdir.glob("*.json"), key=lambda x: int(x.stem) if x.stem.isdigit() else x.stem):
+                                if p.name == ".migrated":
+                                    continue
+                                try:
+                                    m = json.loads(p.read_text(encoding="utf-8"))
+                                except Exception:
+                                    continue
+                                body = m.get("body") or m.get("text") or ""
+                                author = m.get("author") or "unknown"
+                                try:
+                                    await self.post_message(bid, author=author, body=body)
+                                    # preserve original timestamp if present by rewriting last message
+                                    # (best-effort: post_message stamps now, that's acceptable for migration)
+                                except Exception:
+                                    continue
+                            try:
+                                marker.write_text("migrated\n", encoding="utf-8")
+                            except Exception:
+                                pass
+            if chat_history:
+                lobby_id = "lobby"
+                if await self.get_conversation(lobby_id) is None:
                     await self.create_conversation(
-                        kind="board",
-                        title=title,
-                        created_by=board.get("created_by", "system"),
-                        requires=requires,
-                        conv_id=bid,
+                        kind="channel",
+                        title="Lobby",
+                        created_by="system",
+                        conv_id=lobby_id,
                     )
-                    counts["boards"] += 1
-                # migrate messages (marker-gated, idempotent across restarts)
-                bdir = messageboard_root / bid
-                if bdir.is_dir():
-                    marker = bdir / ".migrated"
-                    if not marker.is_file():
-                        for p in sorted(bdir.glob("*.json"), key=lambda x: int(x.stem) if x.stem.isdigit() else x.stem):
-                            if p.name == ".migrated":
-                                continue
-                            try:
-                                m = json.loads(p.read_text(encoding="utf-8"))
-                            except Exception:
-                                continue
-                            body = m.get("body") or m.get("text") or ""
-                            author = m.get("author") or "unknown"
-                            try:
-                                await self.post_message(bid, author=author, body=body)
-                                # preserve original timestamp if present by rewriting last message
-                                # (best-effort: post_message stamps now, that's acceptable for migration)
-                            except Exception:
-                                continue
-                        try:
-                            marker.write_text("migrated\n", encoding="utf-8")
-                        except Exception:
-                            pass
-        if chat_history:
-            lobby_id = "lobby"
-            if await self.get_conversation(lobby_id) is None:
-                await self.create_conversation(
-                    kind="channel",
-                    title="Lobby",
-                    created_by="system",
-                    conv_id=lobby_id,
-                )
-            for entry in chat_history:
-                try:
-                    await self.post_message(
-                        lobby_id,
-                        author=entry.get("author", "unknown"),
-                        body=entry.get("body", entry.get("text", "")),
-                    )
-                    counts["channel_messages"] += 1
-                except Exception:
-                    continue
-        return counts
+                for entry in chat_history:
+                    try:
+                        await self.post_message(
+                            lobby_id,
+                            author=entry.get("author", "unknown"),
+                            body=entry.get("body", entry.get("text", "")),
+                        )
+                        counts["channel_messages"] += 1
+                    except Exception:
+                        continue
+            return counts
