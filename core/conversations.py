@@ -436,33 +436,44 @@ class Conversations:
                 bid = board.get("id", "general")
                 title = board.get("name", bid)
                 requires = board.get("requires") or []
-                # skip if already migrated
-                if await self.get_conversation(bid) is not None:
-                    continue
-                await self.create_conversation(
-                    kind="board",
-                    title=title,
-                    created_by=board.get("created_by", "system"),
-                    requires=requires,
-                    conv_id=bid,
-                )
-                counts["boards"] += 1
-                # migrate messages
+                # Create the conversation only if absent — but do NOT skip
+                # the board on that basis alone: a pre-existing conversation
+                # can still have stranded legacy messages (live incident
+                # 2026-08-25). Message copying is gated by a per-board
+                # .migrated marker instead of conv existence.
+                if await self.get_conversation(bid) is None:
+                    await self.create_conversation(
+                        kind="board",
+                        title=title,
+                        created_by=board.get("created_by", "system"),
+                        requires=requires,
+                        conv_id=bid,
+                    )
+                    counts["boards"] += 1
+                # migrate messages (marker-gated, idempotent across restarts)
                 bdir = messageboard_root / bid
                 if bdir.is_dir():
-                    for p in sorted(bdir.glob("*.json"), key=lambda x: int(x.stem) if x.stem.isdigit() else x.stem):
+                    marker = bdir / ".migrated"
+                    if not marker.is_file():
+                        for p in sorted(bdir.glob("*.json"), key=lambda x: int(x.stem) if x.stem.isdigit() else x.stem):
+                            if p.name == ".migrated":
+                                continue
+                            try:
+                                m = json.loads(p.read_text(encoding="utf-8"))
+                            except Exception:
+                                continue
+                            body = m.get("body") or m.get("text") or ""
+                            author = m.get("author") or "unknown"
+                            try:
+                                await self.post_message(bid, author=author, body=body)
+                                # preserve original timestamp if present by rewriting last message
+                                # (best-effort: post_message stamps now, that's acceptable for migration)
+                            except Exception:
+                                continue
                         try:
-                            m = json.loads(p.read_text(encoding="utf-8"))
+                            marker.write_text("migrated\n", encoding="utf-8")
                         except Exception:
-                            continue
-                        body = m.get("body") or m.get("text") or ""
-                        author = m.get("author") or "unknown"
-                        try:
-                            await self.post_message(bid, author=author, body=body)
-                            # preserve original timestamp if present by rewriting last message
-                            # (best-effort: post_message stamps now, that's acceptable for migration)
-                        except Exception:
-                            continue
+                            pass
         if chat_history:
             lobby_id = "lobby"
             if await self.get_conversation(lobby_id) is None:

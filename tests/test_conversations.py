@@ -230,3 +230,41 @@ def test_migrate_legacy_boards(tmp_path):
 
     _run(_a())
 
+
+def test_migrate_copies_messages_when_conv_preexists(tmp_path):
+    """Live incident 2026-08-25: conv 'general' already existed in the index
+    while messages lived only in the legacy store — migration skipped the
+    board entirely (exists ⇒ migrated was false). Message copy must be gated
+    by a marker file, not by conv existence."""
+    app = _app(tmp_path)
+    import json
+
+    mb_root = app.storage.dir("messageboard")
+    (mb_root / "boards.json").write_text(
+        json.dumps([{"id": "general", "name": "General"}]), encoding="utf-8"
+    )
+    gdir = mb_root / "general"
+    gdir.mkdir(parents=True, exist_ok=True)
+    (gdir / "1.json").write_text(
+        json.dumps({"id": 1, "author": "dave", "subject": "Test", "body": "hello",
+                    "timestamp": "2026-08-22T20:27:21-04:00"}),
+        encoding="utf-8",
+    )
+
+    async def _a():
+        # Conversation PRE-exists before migration runs.
+        await app.conversations.create_conversation(
+            kind="board", title="General", created_by="system", conv_id="general"
+        )
+        counts = await app.conversations.migrate_legacy()
+        assert counts["boards"] == 0  # not re-created...
+        msgs = await app.conversations.list_messages("general")
+        assert len(msgs) == 1         # ...but its messages ARE copied
+        assert msgs[0]["body"] == "hello"
+        # marker prevents double-copy on rerun
+        counts2 = await app.conversations.migrate_legacy()
+        assert counts2["boards"] == 0
+        assert len(await app.conversations.list_messages("general")) == 1
+
+    _run(_a())
+
