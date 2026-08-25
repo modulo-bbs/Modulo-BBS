@@ -26,6 +26,11 @@ from pathlib import Path
 from typing import Any
 
 CONVERSATION_KINDS = {"board", "channel", "dm", "group"}
+
+# B6 (boards-unification): Social thread titles cap at this many chars.
+# Enforced at the op layer (conversations.create, kind=board); the Social
+# sidebar renders titles truncated to the same width.
+SOCIAL_THREAD_TITLE_MAX = 15
 CONVERSATIONS_INDEX = "index.json"
 READS_FILE = "reads.json"
 

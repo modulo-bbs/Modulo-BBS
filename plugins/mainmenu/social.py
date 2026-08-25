@@ -19,8 +19,7 @@ import asyncio
 from dataclasses import dataclass
 
 from shared.textwrap import wrap
-
-TITLE_MAX = 15  # Dave decision 2026-08-25: thread titles cap at 15 chars
+from core.conversations import SOCIAL_THREAD_TITLE_MAX as TITLE_MAX
 
 DMS_ROOM_ID = "dms"  # sentinel id of the pinned DMs aggregate row
 

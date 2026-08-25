@@ -31,6 +31,28 @@ def _user(name, groups=None):
     return User(username=name, groups=groups or [])
 
 
+def test_board_title_capped_for_social_threads(tmp_path):
+    """B6: social thread titles cap at 15 chars at the op layer (400)."""
+    app = _app(tmp_path)
+    dave = _user("dave", ["sysop"])
+
+    async def _a():
+        from core.ops import registry
+
+        with pytest.raises(ValidationError):
+            await registry.call(app, dave, "conversations.create", {
+                "kind": "board", "title": "An Absurdly Long Board Title"})
+        ok = await registry.call(app, dave, "conversations.create", {
+            "kind": "board", "title": "Trading Post"})
+        assert ok["title"] == "Trading Post"
+        # other kinds unaffected
+        dm = await registry.call(app, dave, "conversations.create", {
+            "kind": "dm", "title": "a title much longer than fifteen", "participants": "pleb"})
+        assert dm["kind"] == "dm"
+
+    _run(_a())
+
+
 def test_conversations_ops_via_registry(tmp_path):
     app = _app(tmp_path)
     dave = _user("dave", ["sysop"])

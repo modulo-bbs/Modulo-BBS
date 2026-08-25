@@ -563,6 +563,14 @@ async def _conversations_create(bbs, user, params):
         raise PermissionDeniedError("login required to create conversations")
     kind = params["kind"]
     title = params["title"]
+    # B6: Social thread titles are hard-capped (sidebar width contract)
+    from core.conversations import SOCIAL_THREAD_TITLE_MAX
+
+    if kind == "board" and len(title.strip()) > SOCIAL_THREAD_TITLE_MAX:
+        raise ValidationError(
+            f"board title too long ({len(title.strip())} chars); "
+            f"max {SOCIAL_THREAD_TITLE_MAX}"
+        )
     requires = _split_groups(params.get("requires") or "")
     participants_raw = params.get("participants") or ""
     participants = [p.strip() for p in participants_raw.split(",") if p.strip()]
