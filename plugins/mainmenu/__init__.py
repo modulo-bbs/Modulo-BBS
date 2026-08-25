@@ -118,48 +118,37 @@ def _hint_for_session(session) -> str:
         return " WASD select "
 
 
-def _build_top(tab_bar_visible: str, hint: str, is_plain: bool, width: int = 77) -> str:
-    """Build the box top border with the slash marks under the tab ' | ' delimiters.
+def _flow_cells(labels, hint, active_idx):
+    """Flow-tab layout math (Dave's algorithm, pure len()).
 
-    The rendered line is ``+`` + inner(width) + ``+``, so ``inner[i]`` sits at
-    line index ``i+1``. A tab delimiter whose ``|`` is at line index ``p``
-    must therefore land at ``inner[p-1]`` — this was the off-by-one that put
-    the slashes one column right of the pipes.
+    Each tab renders as a ``| <label> | `` cell (len(label)+5 visible cols);
+    the ACTIVE cell's label is centered to max(len(label), len(hint)) so the
+    funnel hint fits its stop. Returns (label widths, active_x, slot_w) where
+    active_x is the exact visible column of the active cell's opening '|'.
     """
-    pipes = []
-    idx = tab_bar_visible.find(" | ")
-    while idx != -1:
-        pipes.append(idx + 1)  # line index of the '|' character
-        idx = tab_bar_visible.find(" | ", idx + 3)
-    if not pipes:
-        # single tab: centered hint, slashes just outside it
-        mid = width // 2
-        left_in = max(0, mid - len(hint) // 2 - 1)
-        right_in = min(width - 1, left_in + len(hint) + 1)
-    else:
-        left_in = max(0, pipes[0] - 1)   # -1: inner[i] is line index i+1
-        right_in = min(width - 1, max(pipes[-1] - 1, left_in + len(hint) + 1))
-        if right_in - left_in - 1 < len(hint):
-            # hint would not fit between the outer delimiters: center it
-            mid = width // 2
-            left_in = max(0, mid - len(hint) // 2 - 1)
-            right_in = min(width - 1, left_in + len(hint) + 1)
-    inner = ["-"] * width if is_plain else ["─"] * width
-    inner[left_in] = "/" if is_plain else "┤"
-    inner[right_in] = "\\" if is_plain else "├"
-    gap = right_in - left_in - 1
-    if gap >= len(hint):
-        start = left_in + 1 + (gap - len(hint)) // 2
-    else:
-        start = (width - len(hint)) // 2
-    for i, ch in enumerate(hint):
-        pos = start + i
-        if 0 <= pos < width and inner[pos] in ("-", "─"):
-            inner[pos] = ch
-    if is_plain:
-        return "+" + "".join(inner) + "+"
-    return f"{ANSI.DIM}┌{''.join(inner)}┐{ANSI.RESET}"
+    widths = [max(len(lab), len(hint)) if i == active_idx else len(lab)
+              for i, lab in enumerate(labels)]
+    active_x = 5 * active_idx + sum(len(lab) for lab in labels[:active_idx])
+    return widths, active_x, widths[active_idx]
 
+
+def _build_top(labels, active_idx, hint, is_plain, screen_width=79):
+    """Funnel/head row: rule whose '|' sits directly below the active tab's
+    opening '|' and whose backslash closes the stop after the hint —
+    everything below belongs to this heading. Slides with the active tab.
+    """
+    _w, x, slot = _flow_cells(labels, hint, active_idx)
+    fill = "-" if is_plain else "─"
+    head = "| " + hint.center(slot) + " " + chr(92)
+    left = fill * x
+    right = fill * max(0, screen_width - x - len(head))
+    row = (left + head + right)[:screen_width].ljust(screen_width, fill)
+    if is_plain:
+        return row
+    hl = len(head)
+    return (f"{ANSI.DIM}{row[:x]}{ANSI.RESET}"
+            f"{row[x:x+hl]}"
+            f"{ANSI.DIM}{row[x+hl:]}{ANSI.RESET}")
 
 
 # Session state (guarded so this module imports standalone too).
@@ -240,32 +229,26 @@ class MainmenuPlugin(Plugin):
         return getattr(session, "_pim_active_tab", None) or "dashboard"
 
     def _render_tabs(self, session, tabs: list[dict], active_id: str) -> str:
-        """Top tab bar: caps=active in plain fallback, colors in ANSI.
-
-        Every tab is padded to at least 11 visible columns (9 inner + 2 spaces)
-        so the 9-char '←↑↓→/WASD' hint has room and the box slashes can land
-        under a ' | ' delimiter. With 5 tabs: 5*11 + 4*3 = 67 cols < 79.
-        """
+        """Tab row as '| label | ' cells (same _flow_cells math as the funnel
+        row, so alignment holds by construction, not by coordinates)."""
         is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
-        MIN_INNER = 9
-        parts: list[str] = []
-        for t in tabs:
-            label = t["label"]
-            is_active = t["id"] == active_id
-            # pad inner label to MIN_INNER
-            core = label.upper() if (is_plain and is_active) else label
-            if len(core) < MIN_INNER:
-                core = core.center(MIN_INNER)
-            else:
-                core = core[:MIN_INNER]
+        labels = [x["label"] for x in tabs]
+        active_idx = max(0, next((i for i, x in enumerate(tabs) if x["id"] == active_id), 0))
+        hint = _hint_for_session(session)
+        widths, _x, _s = _flow_cells(labels, hint, active_idx)
+        parts = []
+        for i, tb in enumerate(tabs):
+            lab = tb["label"]
+            cell = lab.center(widths[i]) if i == active_idx else lab
             if is_plain:
-                parts.append(f" {core} ")
+                parts.append(cell.upper() if i == active_idx else cell)
+            elif i == active_idx:
+                parts.append(f"{ANSI.BRIGHT_WHITE}{ANSI.BG_BLUE}{cell}{ANSI.RESET}")
             else:
-                if is_active:
-                    parts.append(f"{ANSI.BRIGHT_WHITE}{ANSI.BG_BLUE} {core} {ANSI.RESET}")
-                else:
-                    parts.append(f"{ANSI.DIM} {core} {ANSI.RESET}")
-        return " | ".join(parts)
+                parts.append(f"{ANSI.DIM}{cell}{ANSI.RESET}")
+        row = "".join(f"| {c} | " for c in parts)
+        vis = 5 * len(parts) + sum(widths)
+        return row + " " * max(0, 79 - vis)
 
     async def _render_pane(self, session, tab: dict) -> str:
         """Middle pane: filtered conversation list for the active tab.
@@ -364,9 +347,11 @@ class MainmenuPlugin(Plugin):
             is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
             from plugins.mainmenu.tabs import load_tabs, visible_tabs
             tabs_for_top = visible_tabs(load_tabs(self.bbs), getattr(session, "user", None))
-            tab_bar_vis = _strip_ansi(self._render_tabs(session, tabs_for_top, self._active_tab_id(session)))
+            labels = [x["label"] for x in tabs_for_top]
+            _aid = self._active_tab_id(session)
+            active_idx = max(0, next((i for i, x in enumerate(tabs_for_top) if x["id"] == _aid), 0))
             hint = _hint_for_session(session)
-            top = _build_top(tab_bar_vis, hint, is_plain, width=77)
+            top = _build_top(labels, active_idx, hint, is_plain, screen_width=79)
             bot = "+" + "-" * 77 + "+" if is_plain else f"{ANSI.DIM}└{'─' * 77}┘{ANSI.RESET}"
             lines = [top]
             # highlight the selected digest row
@@ -418,9 +403,11 @@ class MainmenuPlugin(Plugin):
         is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
         from plugins.mainmenu.tabs import load_tabs, visible_tabs
         tabs_for_top = visible_tabs(load_tabs(self.bbs), getattr(session, "user", None))
-        tab_bar_vis = _strip_ansi(self._render_tabs(session, tabs_for_top, self._active_tab_id(session)))
+        labels = [x["label"] for x in tabs_for_top]
+        _aid = self._active_tab_id(session)
+        active_idx = max(0, next((i for i, x in enumerate(tabs_for_top) if x["id"] == _aid), 0))
         hint = _hint_for_session(session)
-        top = _build_top(tab_bar_vis, hint, is_plain, width=77)
+        top = _build_top(labels, active_idx, hint, is_plain, screen_width=79)
         bot = "+" + "-" * 77 + "+" if is_plain else f"{ANSI.DIM}└{'─' * 77}┘{ANSI.RESET}"
         lines = [top]
         if not convs:
