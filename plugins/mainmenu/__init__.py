@@ -254,9 +254,17 @@ class MainmenuPlugin(Plugin):
         """Middle pane: filtered conversation list for the active tab.
 
         In Dashboard tab, this is the digest quick-links list (one row per
-        area with new activity, elided to 79). In other tabs, it's the
-        filtered conversation list (``@author (age): preview``).
+        area with new activity, elided to 79). In the Social tab it's the
+        two-pane room sidebar | thread view (boards-unification B3).
+        Otherwise, it's the filtered conversation list
+        (``@author (age): preview``).
         """
+        # Social: two-pane surface (B3) replaces the conversation list here
+        if tab.get("id") == "social":
+            from plugins.mainmenu.social import render_social
+
+            return await render_social(self.bbs.conversations, session)
+
         # Dashboard digest quick-links — each row is a filtered shortcut
         if tab.get("id") == "dashboard" or tab.get("kind") == "dashboard":
             # Build digests: DMs / Bulletins / Files / Boards — each as
@@ -489,6 +497,12 @@ class MainmenuPlugin(Plugin):
             session._pim_active_tab = tabs[active_idx]["id"]  # type: ignore[attr-defined]
             session._pim_selected = 0  # type: ignore[attr-defined]
             return True
+        # B4: Social owns its own keys (rooms/scroll/compose/back) once the
+        # tab-switch keys above had their chance. Everything it declines
+        # falls through to the generic pane handling below.
+        if tabs[active_idx].get("id") == "social":
+            if await self._handle_social_key(session, key):
+                return True
         # UP/DN move highlight inside pane
         if key == "UP":
             sel = getattr(session, "_pim_selected", 0)
@@ -534,6 +548,155 @@ class MainmenuPlugin(Plugin):
             session._pim_selected = sel + 1  # type: ignore[attr-defined]
             return True
         return False
+
+    async def _handle_social_key(self, session, key: str) -> bool:
+        """Social tab keys (boards-unification §B4). Returns True if consumed.
+
+        Browse keys (arrows/PgUp/PgDn/Space/ESC/B/ENTER) act immediately;
+        compose actions (R/N/D) drop into LINE mode via ``read_command`` —
+        per the plan's hard rule the two modes never blur, so no navigation
+        keystroke can leak into a draft.
+        """
+        from plugins.mainmenu.social import social_rooms
+
+        user = getattr(session, "user", None)
+        rooms = await social_rooms(self.bbs.conversations, user)
+        n = len(rooms)
+        sel = int(getattr(session, "_pim_selected", 0) or 0)
+        sel = max(0, min(sel, n - 1)) if n else 0
+
+        def _page() -> int:
+            return max(6, int(getattr(session, "terminal_height", 24) or 24) - 6)
+
+        if key in ("UP", "K") and n:
+            session._pim_selected = (sel - 1) % n  # type: ignore[attr-defined]
+            return True
+        if key in ("DOWN", "J") and n:
+            session._pim_selected = (sel + 1) % n  # type: ignore[attr-defined]
+            return True
+        if key in ("PGDN", "SPACE"):
+            up = int(getattr(session, "_social_scroll_up", 0) or 0)
+            session._social_scroll_up = max(0, up - _page())  # type: ignore[attr-defined]
+            return True
+        if key == "PGUP":
+            up = int(getattr(session, "_social_scroll_up", 0) or 0)
+            session._social_scroll_up = up + _page()  # type: ignore[attr-defined]
+            return True
+        if key == "ESC" or key == "B":
+            # Back/up one level: Social → Dashboard. B is scoped to this
+            # handler only — outside Social nothing changes.
+            session._pim_active_tab = "dashboard"  # type: ignore[attr-defined]
+            session._pim_selected = 0  # type: ignore[attr-defined]
+            session._social_scroll_up = 0  # type: ignore[attr-defined]
+            return True
+        if key == "ENTER":
+            # Selection already re-renders live; Enter has no job here.
+            return True
+        if key == "N":
+            await self._social_new_thread(session)
+            return True
+        if key == "R":
+            await self._social_compose(session, rooms, sel, delete=False)
+            return True
+        if key == "D":
+            await self._social_compose(session, rooms, sel, delete=True)
+            return True
+        return False
+
+    async def _social_target_conv(self, session, rooms, sel):
+        """Conversation behind the highlighted sidebar row."""
+        room = rooms[sel] if sel < len(rooms) else None
+        if room is None:
+            return None
+        if room.kind == "dms":
+            dms = await self.bbs.conversations.list_conversations(
+                kind="dm", visible_to=getattr(session, "user", None))
+            dms.sort(key=lambda c: c.get("last_message_at") or c.get("created", ""),
+                     reverse=True)
+            return dms[0] if dms else None
+        try:
+            return await self.bbs.conversations.get_conversation(room.id)
+        except Exception:
+            return None
+
+    async def _social_new_thread(self, session):
+        """Compose mode: prompt for a title (≤15 chars), then create+select."""
+        while True:
+            await self.bbs.send(session, "\r\nThread title (max 15 chars): ")
+            raw = await runner.read_command(self.bbs, session)
+            if raw is None:
+                return
+            title = raw.strip()
+            if not title:
+                await self.bbs.send(session, "(cancelled)\r\n")
+                return
+            if len(title) > 15:
+                await self.bbs.send(session,
+                                    f"Too long ({len(title)} chars) — 15 max.\r\n")
+                continue
+            conv = await self.bbs.conversations.create_conversation(
+                kind="board", title=title, created_by=session.user.username)
+            from plugins.mainmenu.social import social_rooms
+
+            rooms = await social_rooms(self.bbs.conversations, session.user)
+            for i, r in enumerate(rooms):
+                if r.id == conv["id"]:
+                    session._pim_selected = i  # type: ignore[attr-defined]
+                    break
+            session._social_scroll_up = 0  # type: ignore[attr-defined]
+            await self.bbs.send(session, f"Thread '{title}' created.\r\n")
+            return
+
+    async def _social_compose(self, session, rooms, sel, *, delete: bool):
+        """R = post into the highlighted room; D = delete one of your posts
+        (or any, for moderators). Both are LINE-mode compose flows."""
+        conv = await self._social_target_conv(session, rooms, sel)
+        if conv is None:
+            await self.bbs.send(session, "\r\n(no room selected)\r\n")
+            return
+        if not delete:
+            await self.bbs.send(
+                session,
+                f"\r\nMessage to {conv['title']} — empty line sends, /A aborts.\r\n",
+            )
+            lines: list[str] = []
+            while True:
+                line = await runner.read_command(self.bbs, session)
+                if line is None:
+                    return
+                if line.strip().upper() == "/A":
+                    await self.bbs.send(session, "\r\nAborted.\r\n")
+                    return
+                if not line.strip():
+                    break
+                lines.append(line)
+            body = "\n".join(lines).strip()
+            if not body:
+                await self.bbs.send(session, "\r\n(empty — nothing posted)\r\n")
+                return
+            await self.bbs.conversations.post_message(
+                conv["id"], author=session.user.username, body=body)
+            try:
+                await self.bbs.conversations.mark_read(session.user.username, conv["id"])
+            except Exception:
+                pass
+            session._social_scroll_up = 0  # show the new post (tail anchor)
+            await self.bbs.send(session, "\r\nPosted.\r\n")
+            return
+        await self.bbs.send(session, "\r\nDelete message #: ")
+        raw = await runner.read_command(self.bbs, session)
+        if raw is None or not raw.strip().isdigit():
+            return
+        mid = int(raw.strip())
+        try:
+            ok = await self.bbs.conversations.delete_message(
+                conv["id"], mid, by_user=session.user)
+            await self.bbs.send(
+                session, f"\r\n{'Deleted #' + str(mid) if ok else 'No such message.'}\r\n")
+        except PermissionError as e:
+            await self.bbs.send(session, f"\r\nNot allowed: {e}\r\n")
+        except Exception as e:  # noqa: BLE001
+            await self.bbs.send(session, f"\r\nFailed: {e}\r\n")
 
     async def _open_selected(self, session, tab: dict) -> None:
         """Open the highlighted conversation in a full-screen reader.

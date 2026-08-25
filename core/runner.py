@@ -35,8 +35,21 @@ _ARROW_MAP = {
     "\x1bOA": "UP", "\x1bOB": "DOWN", "\x1bOC": "RIGHT", "\x1bOD": "LEFT",
 }
 
+# CSI ~ sequences (B4: Social thread-pane scrolling)
+_CSI_MAP = {
+    "\x1b[5~": "PGUP",
+    "\x1b[6~": "PGDN",
+}
+
 def _try_arrow(buf: str):
     if buf.startswith(("\x1b[", "\x1bO")):
+        if buf.startswith("\x1b[") and len(buf) >= 3 and buf[2].isdigit():
+            m = _CSI_MAP.get(buf[:4])
+            if m:
+                return m, buf[4:]
+            if len(buf) < 4:
+                return None  # waiting for the '~'
+            return "__SKIP__", buf[4:]  # unknown CSI~ — skip the whole form
         if len(buf) < 3:
             return None  # incomplete
         seq = buf[:3]
@@ -185,6 +198,9 @@ async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
         if buf[0] in ("\r", "\n"):
             session._line_buffer = buf[1:]
             return "ENTER"
+        if buf[0] == " ":
+            session._line_buffer = buf[1:]
+            return "SPACE"  # B4: PgDn alias on Social
         ch, buf = buf[0], buf[1:]
         session._line_buffer = buf
         if ch.isprintable() and not ch.isspace():
@@ -230,6 +246,9 @@ async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
             if ch in ("\r", "\n"):
                 session._line_buffer = buf[i + 1 :]
                 return "ENTER"
+            if ch == " ":
+                session._line_buffer = buf[i + 1 :]
+                return "SPACE"  # B4: PgDn alias on Social
             if ch == "\x1b":
                 # start of an ESC sequence — wait, but only briefly
                 # (B0: silence resolves to a lone "ESC" keypress)
