@@ -733,10 +733,10 @@ class MainmenuPlugin(Plugin):
                     if tabs and not any(t["id"] == active_id for t in tabs):
                         active_id = tabs[0]["id"]
                         session._pim_active_tab = active_id  # type: ignore[attr-defined]
-                    # band A: tabs
+                    # band A: tabs (funnel row in _render_pane connects
+                    # directly — no separator line, saves a row on 80x24)
                     tab_bar = self._render_tabs(session, tabs, active_id)
                     await self.bbs.send(session, tab_bar + "\r\n")
-                    await self.bbs.send(session, "─" * 79 + "\r\n")
                     # band B: pane
                     active_tab = next((t for t in tabs if t["id"] == active_id), tabs[0] if tabs else {"id": "boards", "label": "Boards", "kind": "board"})
                     pane = await self._render_pane(session, active_tab)
@@ -750,7 +750,6 @@ class MainmenuPlugin(Plugin):
                     session._pim_active_tab = active_id  # type: ignore[attr-defined]
                 tab_bar = self._render_tabs(session, tabs, active_id)
                 await self.bbs.send(session, tab_bar + "\r\n")
-                await self.bbs.send(session, "─" * 79 + "\r\n")
                 active_tab = next((t for t in tabs if t["id"] == active_id), tabs[0] if tabs else {"id": "boards", "label": "Boards", "kind": "board"})
                 pane = await self._render_pane(session, active_tab)
                 await self.bbs.send(session, pane + "\r\n")
