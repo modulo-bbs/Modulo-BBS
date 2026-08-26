@@ -221,7 +221,7 @@ async def render_social(conversations, session) -> str:
         star = "*" if r.unread else " "
         side.append(f"{marker} {r.title:<15}{star}")
     if overflow:
-        side.append(f"  …{overflow} more")
+        side.append(f"  ..{overflow} more")
 
     # -- pane cell rows -------------------------------------------------------
     pane: list[str] = []

@@ -41,7 +41,7 @@ def user_can_access(user, requires) -> bool:
 def _age_label(iso: str) -> str:
     """Human age like '3m ago', '5d ago', '3mo ago' for display."""
     if not iso:
-        return "—"
+        return "-"
     try:
         from datetime import datetime, timezone
 
@@ -66,7 +66,7 @@ def _age_label(iso: str) -> str:
         years = days // 365
         return f"{years}y ago"
     except Exception:
-        return "—"
+        return "-"
 
 
 def _elided(prefix: str, items: list[str], sep: str = ", ", width: int = 77) -> str:
@@ -755,7 +755,7 @@ class MainmenuPlugin(Plugin):
             slice_ = msgs[start : start + per_page]
 
             await self.bbs.send(session, "\x1b[2J\x1b[H")
-            header = f" {conv.get('title','?')} — {len(msgs)} messages  (page {page+1}/{total_pages})"
+            header = f" {conv.get('title','?')} - {len(msgs)} messages  (page {page+1}/{total_pages})"
             await self.bbs.send(session, header + "\r\n" + "─" * 79 + "\r\n")
             if not slice_:
                 if not msgs:
