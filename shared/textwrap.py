@@ -38,3 +38,40 @@ def wrap(text: str, width: int) -> list[str]:
                 cur = word
         lines.append(cur)
     return lines
+
+
+def wrap_rows(text: str, width: int) -> list[tuple[int, int]]:
+    """Soft-wrap *text* into fixed-box display rows, tracking offsets.
+
+    Returns ``(start, length)`` pairs that partition *text* into contiguous,
+    non-overlapping rows of at most *width* chars — ``text[start:start +
+    length]`` is each displayed row. Greedy word wrap on spaces (spaces at a
+    wrap boundary are dropped from the layout); words longer than *width*
+    hard-break; an explicit newline ends the current row, and a trailing
+    newline yields a final zero-length row so a caret can rest on the blank
+    last line. Never empty: ``""`` yields ``[(0, 0)]``.
+    """
+    if width < 1:
+        width = 1
+
+    rows: list[tuple[int, int]] = []
+    ls = 0
+    n = len(text)
+    while ls <= n:
+        nl = text.find("\n", ls)
+        le = n if nl == -1 else nl
+        cur = ls
+        while True:
+            if le - cur <= width:
+                rows.append((cur, le - cur))
+                break
+            brk = text.rfind(" ", cur + 1, cur + width + 1)
+            seg = (brk - cur) if brk != -1 else width
+            rows.append((cur, seg))
+            cur += seg
+            while cur < le and text[cur] == " ":
+                cur += 1
+        if nl == -1:
+            break
+        ls = nl + 1
+    return rows

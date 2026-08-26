@@ -364,74 +364,101 @@ def test_input_rows_clipped_to_cap_keeping_latest_lines(tmp_path):
     assert "> L08" not in final    # prompt marker scrolled off with its line
 
 
-def _run_chat_with_editor(s, app, conv, keys, lines):
-    """Drive _social_chat with scripted read_key AND read_command streams."""
+def _run_chat_with_editor(s, app, conv, keys):
+    """Drive _social_chat with a scripted read_key stream (editor included)."""
     p = app.get_plugin("mainmenu")
-    orig_rk, orig_rc = runner.read_key, runner.read_command
+    orig_rk = runner.read_key
 
     async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
         return next(keys)
 
-    async def fake_rc(bbs, sess, timeout=runner.IDLE_TIMEOUT):
-        return next(lines)
-
-    runner.read_key, runner.read_command = fake_rk, fake_rc  # type: ignore[assignment]
+    runner.read_key = fake_rk  # type: ignore[assignment]
     try:
         asyncio.run(p._social_chat(s, conv))
     finally:
-        runner.read_key, runner.read_command = orig_rk, orig_rc  # type: ignore[assignment]
+        runner.read_key = orig_rk  # type: ignore[assignment]
 
 
-def test_ctrl_e_opens_full_editor_and_sends_multiline(tmp_path):
+def test_ctrl_e_opens_notepad_and_ctrl_enter_sends(tmp_path):
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    _run_chat_with_editor(
-        s, app, {"id": "b1", "title": "General"},
-        iter(["CTRL_E", "ESC"]), iter(["hello", "", "world", "/S"]))
+    keys = ["CTRL_E"] + list("hi") + ["ENTER", "ENTER"] + list("world") + ["LF", "ESC"]
+    _run_chat_with_editor(s, app, {"id": "b1", "title": "General"}, iter(keys))
     text = _plain(s)
-    assert "EDITOR" in text and "/S=send" in text
+    assert "+----" in text or "\u250c" in bytes(s.writer.buf)  # box drawn
     msgs = asyncio.run(app.conversations.list_messages("b1"))
-    assert msgs[-1]["body"] == "hello\n\nworld"   # blank line preserved
+    assert msgs[-1]["body"] == "hi\n\nworld"   # blank line preserved
     assert msgs[-1]["author"] == "dave"
 
 
-def test_full_editor_abort_restores_entry_draft(tmp_path):
+def test_notepad_esc_keeps_draft_back_in_chat_box(tmp_path):
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    # draft "hi" before the editor; editor types "oops" then aborts;
-    # back in chat, ENTER must post the ENTRY draft, not the edit.
-    _run_chat_with_editor(
-        s, app, {"id": "b1", "title": "General"},
-        iter(["h", "i", "CTRL_E", "ENTER", "ESC"]),
-        iter(["oops", "/A"]))
+    # draft "hi" -> editor appends "xy" at the caret -> ESC keeps it ->
+    # back in the chat box ENTER posts the carried draft.
+    keys = ["h", "i", "CTRL_E"] + list("xy") + ["ESC", "ENTER", "ESC"]
+    _run_chat_with_editor(s, app, {"id": "b1", "title": "General"}, iter(keys))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
-    assert msgs[-1]["body"] == "hi"
+    assert msgs[-1]["body"] == "hixy"
 
 
-def test_full_editor_eof_keeps_draft(tmp_path):
+def test_notepad_arrows_insert_midline(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    # "ac", LEFT over the c, insert b -> "abc", Ctrl-Enter sends.
+    keys = ["CTRL_E"] + list("ac") + ["LEFT"] + ["b", "LF", "ESC"]
+    _run_chat_with_editor(s, app, {"id": "b1", "title": "General"}, iter(keys))
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert msgs[-1]["body"] == "abc"
+
+
+def test_notepad_capacity_capped_to_box(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    s.terminal_height = 8          # interior 2 rows x 76 cols -> cap 152
+    p = app.get_plugin("mainmenu")
+
+    async def _a():
+        # editor is entered directly: no leading CTRL_E (the chat eats it)
+        keys = iter(["x"] * 200 + ["ESC"])
+        orig = runner.read_key
+
+        async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
+            return next(keys)
+
+        runner.read_key = fake_rk  # type: ignore[assignment]
+        try:
+            posted, draft = await p._social_overlay_editor(
+                s, {"id": "b1", "title": "General"}, "")
+        finally:
+            runner.read_key = orig  # type: ignore[assignment]
+        assert posted is False
+        assert draft == "x" * 152   # overflow refused, box never scrolls
+
+    asyncio.run(_a())
+
+
+def test_notepad_dead_session_exits_keeping_draft(tmp_path):
     app = _app(tmp_path)
     _seed(app)
     s = _session(User(username="dave", groups=[]))
     p = app.get_plugin("mainmenu")
 
     async def _a():
-        orig = runner.read_command
+        from server.session import SessionState
 
-        async def fake_rc(bbs, sess, timeout=runner.IDLE_TIMEOUT):
-            return None  # disconnect mid-compose
-
-        runner.read_command = fake_rc  # type: ignore[assignment]
-        try:
-            posted, draft = await p._social_full_editor(
-                s, {"id": "b1", "title": "General"}, "seed text")
-        finally:
-            runner.read_command = orig  # type: ignore[assignment]
+        s.state = SessionState.DISCONNECTED
+        posted, draft = await p._social_overlay_editor(
+            s, {"id": "b1", "title": "General"}, "kept")
         assert posted is False
-        assert draft == "seed text"
-        assert "EDITOR" in bytes(s.writer.buf).decode("cp437", errors="replace")
+        assert draft == "kept"
 
     asyncio.run(_a())

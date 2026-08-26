@@ -652,11 +652,12 @@ class MainmenuPlugin(Plugin):
 
         You just type; Enter posts. Ctrl-Enter (LF) inserts a newline and
         the input area grows upward, overwriting bubble rows until sent.
-        Ctrl-E expands into the full-screen line editor (/S send, /A abort)
-        with the draft carried both ways. UP/DOWN scroll back through
-        history (entry is always tail-anchored), PgUp/PgDn page, ESC leaves.
-        While idle the loop polls the store once a second, so messages from
-        other nodes/sessions appear as *NEW* bubbles on every view.
+        Ctrl-E expands into an overlay notepad box (arrows move the caret
+        anywhere, Enter opens a line, Ctrl-Enter sends, ESC keeps the
+        draft). UP/DOWN scroll back through history (entry is always
+        tail-anchored), PgUp/PgDn page, ESC leaves. While idle the loop
+        polls the store once a second, so messages from other nodes/sessions
+        appear as *NEW* bubbles on every view.
         """
         import time
 
@@ -787,7 +788,7 @@ class MainmenuPlugin(Plugin):
                         rows = input_rows(draft)
                         last_fp = None
                 elif key == "CTRL_E":
-                    posted, new_draft = await self._social_full_editor(
+                    posted, new_draft = await self._social_overlay_editor(
                         session, conv, draft)
                     if posted:
                         if new_draft.strip():
@@ -859,59 +860,107 @@ class MainmenuPlugin(Plugin):
         finally:
             session.suppress_echo = prev_suppress  # type: ignore[attr-defined]
 
-    async def _social_full_editor(self, session, conv: dict, draft: str) -> tuple[bool, str]:
-        """Full-screen compose (Ctrl-E from chat). Classic line editor per
-        the input-modes rule: compose reads via read_command — every key is
-        text, arrows do nothing, ESC deliberately does NOT abort. Enter
-        commits a line (blank lines allowed); /S sends; /A aborts back to
-        chat with the entry draft restored (edits discarded).
-        Returns (posted, draft).
+    async def _social_overlay_editor(self, session, conv: dict, draft: str) -> tuple[bool, str]:
+        """Overlay notepad editor (Ctrl-E from chat).
+
+        A bright-green bordered box overlays the chat; the draft renders
+        inside it from the top with soft wrap. Notepad-style caret editing:
+        arrows move the caret anywhere in the box, Enter opens a line,
+        Backspace joins, typing inserts at the caret. Capacity is capped to
+        the box — an edit that would not fit is refused. Ctrl-Enter sends;
+        ESC or Ctrl-E returns to chat keeping the draft.
+        Returns (sent, draft).
         """
-        from shared.textwrap import wrap as _tw_wrap
+        import time
+
+        from shared.textwrap import wrap_rows
+
+        def _caret_cell(rows: list[tuple[int, int]], off: int) -> tuple[int, int]:
+            for i, (st, ln) in enumerate(rows):
+                if off <= st + ln:
+                    return i, off - st
+            st, ln = rows[-1]
+            return len(rows) - 1, min(off - st, ln)
 
         h = int(getattr(session, "terminal_height", 24) or 24)
-        w = 79
+        L, R = 1, 79                      # border columns (inclusive)
+        top, bot = 2, max(4, h - 3)       # border rows (inclusive)
+        Wid = R - L - 1                   # interior columns
+        H = bot - top - 1                 # interior rows — hard capacity
+        inner_w = Wid - 1                 # text column minus gutter space
         is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
         G = "" if is_plain else ANSI.BRIGHT_GREEN
-        R = "" if is_plain else ANSI.RESET
-        title = str(conv.get("title", conv.get("id", "?")))
-        entry = draft
-        work = draft
+        RST = "" if is_plain else ANSI.RESET
+        if is_plain:
+            tl, tr, bl, br, hb, vb = "+", "+", "+", "+", "-", "|"
+        else:
+            tl, tr, bl, br, hb, vb = "┌", "┐", "└", "┘", "─", "│"
 
-        def render() -> str:
-            rows: list[str] = []
-            for ln in (work.split("\n") if work else [""]):
-                for seg in _tw_wrap(ln, w - 2) or [""]:
-                    rows.append("  " + seg)
-            head = (f" EDITOR {title} - {len(rows)} rows - "
-                    f"Enter=next line /S=send /A=abort ")
-            lines = [head[:w].ljust(w)]
-            lines.extend(rows[-(h - 2):])
-            while len(lines) < h:
-                lines.append(" " * w)
-            lines[h - 1] = f"{G}>{R} "
-            return "\x1b[2J\x1b[H" + "\x1b[K\r\n".join(lines)
+        def render(text: str, off: int) -> str:
+            rows = wrap_rows(text, inner_w)
+            parts = [f"\x1b[{top};{L}H", f"{G}{tl}{hb * Wid}{tr}{RST}"]
+            for i in range(H):
+                body = ""
+                if i < len(rows):
+                    st, ln = rows[i]
+                    body = text[st:st + ln]
+                parts.append("\r\n" + f"{G}{vb}{RST}"
+                             + (" " + body).ljust(Wid) + f"{G}{vb}{RST}")
+            parts.append("\r\n" + f"{G}{bl}{hb * Wid}{br}{RST}")
+            r, c = _caret_cell(rows, min(off, len(text)))
+            parts.append(f"\x1b[{top + 1 + r};{L + 1 + c}H")
+            return "".join(parts)
 
-        # Compose mode: server-side echo paints typing (with in-place
-        # backspace); the editor repaints after each committed line.
-        prev_suppress = getattr(session, "suppress_echo", False)
-        session.suppress_echo = False  # type: ignore[attr-defined]
-        try:
-            await self.bbs.send(session, render())
-            while getattr(session, "is_active", True):
-                line = await runner.read_command(self.bbs, session)
-                if line is None:
-                    return False, work  # EOF/disconnect: keep the draft
-                cmd = line.strip()
-                if cmd == "/S":
-                    return True, work
-                if cmd == "/A":
-                    return False, entry
-                work = f"{work}\n{line}" if work else line
-                await self.bbs.send(session, render())
-            return False, work
-        finally:
-            session.suppress_echo = prev_suppress  # type: ignore[attr-defined]
+        text, off = draft, len(draft)
+
+        def fits(cand: str) -> bool:
+            return len(wrap_rows(cand, inner_w)) <= H
+
+        last_key_at = time.monotonic()
+        await self.bbs.send(session, render(text, off))
+        while getattr(session, "is_active", True):
+            key = await runner.read_key(
+                self.bbs, session, timeout=1.0,
+                preserve_case=True, idle_on_timeout=False)
+            if key is None:
+                if time.monotonic() - last_key_at > runner.IDLE_TIMEOUT:
+                    return False, text  # idle: back to chat, draft kept
+                continue
+            last_key_at = time.monotonic()
+            rows = wrap_rows(text, inner_w)
+
+            if key == "LF":
+                return True, text           # Ctrl-Enter: send
+            if key in ("ESC", "CTRL_E"):
+                return False, text          # back to chat, draft kept
+            if key == "ENTER":
+                cand = text[:off] + "\n" + text[off:]
+                if fits(cand):
+                    text, off = cand, off + 1
+            elif key == "BACKSPACE":
+                if off:
+                    text, off = text[:off - 1] + text[off:], off - 1
+            elif key == "LEFT":
+                off = max(0, off - 1)
+            elif key == "RIGHT":
+                off = min(len(text), off + 1)
+            elif key in ("UP", "DOWN"):
+                r, c = _caret_cell(rows, off)
+                nr = r - 1 if key == "UP" else r + 1
+                if 0 <= nr < len(rows):
+                    st, ln = rows[nr]
+                    off = st + min(c, ln)
+            elif key == "SPACE":
+                cand = text[:off] + " " + text[off:]
+                if fits(cand):
+                    text, off = cand, off + 1
+            elif len(key) == 1 and key.isprintable():
+                cand = text[:off] + key + text[off:]
+                if fits(cand):
+                    text, off = cand, off + 1
+            # anything else: ignore
+            await self.bbs.send(session, render(text, off))
+        return False, text
 
     async def _open_selected(self, session, tab: dict) -> None:
         """Open the highlighted conversation in a full-screen reader.
