@@ -650,12 +650,13 @@ class MainmenuPlugin(Plugin):
     async def _social_chat(self, session, conv: dict) -> None:
         """Telegram-style chat (B8): bubble history + bottom input area.
 
-        You just type; Enter posts. Shift-Enter (LF) inserts a newline and
+        You just type; Enter posts. Ctrl-Enter (LF) inserts a newline and
         the input area grows upward, overwriting bubble rows until sent.
-        UP/DOWN scroll back through history (entry is always tail-anchored),
-        PgUp/PgDn page, ESC leaves. While idle the loop polls the store once
-        a second, so messages from other nodes/sessions appear as *NEW*
-        bubbles on every view.
+        Ctrl-E expands into the full-screen line editor (/S send, /A abort)
+        with the draft carried both ways. UP/DOWN scroll back through
+        history (entry is always tail-anchored), PgUp/PgDn page, ESC leaves.
+        While idle the loop polls the store once a second, so messages from
+        other nodes/sessions appear as *NEW* bubbles on every view.
         """
         import time
 
@@ -727,7 +728,7 @@ class MainmenuPlugin(Plugin):
 
                     new_count = sum(1 for m in msgs if int(m.get("id", 0)) > baseline)
                     title = str(conv.get("title", cid))
-                    head = f" {title} - {len(msgs)} msgs - Enter send / Shift-Enter newline / ESC back "
+                    head = f" {title} - {len(msgs)} msgs - Enter send / Ctrl-E editor / ESC back "
                     status_parts = []
                     if scroll_back:
                         status_parts.append(f"history: {scroll_back} newer hidden - DOWN/PgDn")
@@ -767,7 +768,7 @@ class MainmenuPlugin(Plugin):
                     break
                 if key == "ENTER":
                     # Swallow a client's trailing LF after CR (\r\n Enter);
-                    # a deliberate Shift-Enter LF only comes after more keys.
+                    # a deliberate Ctrl-Enter LF only comes after more keys.
                     stash = getattr(session, "_line_buffer", "")
                     if stash.startswith("\n"):
                         session._line_buffer = stash[1:]
@@ -785,6 +786,28 @@ class MainmenuPlugin(Plugin):
                         draft = ""
                         rows = input_rows(draft)
                         last_fp = None
+                elif key == "CTRL_E":
+                    posted, new_draft = await self._social_full_editor(
+                        session, conv, draft)
+                    if posted:
+                        if new_draft.strip():
+                            await self.bbs.conversations.post_message(
+                                cid, author=uname or "anonymous",
+                                body=new_draft.rstrip())
+                            try:
+                                await self.bbs.conversations.mark_read(uname, cid)
+                            except Exception:
+                                pass
+                            fresh = await self.bbs.conversations.list_messages(cid)
+                            baseline = max(
+                                (int(m.get("id", 0)) for m in fresh),
+                                default=baseline)
+                            scroll_back = 0
+                        draft = ""
+                    else:
+                        draft = new_draft
+                    rows = input_rows(draft)
+                    last_fp = None
                 elif key == "LF":
                     draft += "\n"
                     rows = input_rows(draft)
@@ -833,6 +856,60 @@ class MainmenuPlugin(Plugin):
                 )
             except Exception:
                 pass
+        finally:
+            session.suppress_echo = prev_suppress  # type: ignore[attr-defined]
+
+    async def _social_full_editor(self, session, conv: dict, draft: str) -> tuple[bool, str]:
+        """Full-screen compose (Ctrl-E from chat). Classic line editor per
+        the input-modes rule: compose reads via read_command — every key is
+        text, arrows do nothing, ESC deliberately does NOT abort. Enter
+        commits a line (blank lines allowed); /S sends; /A aborts back to
+        chat with the entry draft restored (edits discarded).
+        Returns (posted, draft).
+        """
+        from shared.textwrap import wrap as _tw_wrap
+
+        h = int(getattr(session, "terminal_height", 24) or 24)
+        w = 79
+        is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
+        G = "" if is_plain else ANSI.BRIGHT_GREEN
+        R = "" if is_plain else ANSI.RESET
+        title = str(conv.get("title", conv.get("id", "?")))
+        entry = draft
+        work = draft
+
+        def render() -> str:
+            rows: list[str] = []
+            for ln in (work.split("\n") if work else [""]):
+                for seg in _tw_wrap(ln, w - 2) or [""]:
+                    rows.append("  " + seg)
+            head = (f" EDITOR {title} - {len(rows)} rows - "
+                    f"Enter=next line /S=send /A=abort ")
+            lines = [head[:w].ljust(w)]
+            lines.extend(rows[-(h - 2):])
+            while len(lines) < h:
+                lines.append(" " * w)
+            lines[h - 1] = f"{G}>{R} "
+            return "\x1b[2J\x1b[H" + "\x1b[K\r\n".join(lines)
+
+        # Compose mode: server-side echo paints typing (with in-place
+        # backspace); the editor repaints after each committed line.
+        prev_suppress = getattr(session, "suppress_echo", False)
+        session.suppress_echo = False  # type: ignore[attr-defined]
+        try:
+            await self.bbs.send(session, render())
+            while getattr(session, "is_active", True):
+                line = await runner.read_command(self.bbs, session)
+                if line is None:
+                    return False, work  # EOF/disconnect: keep the draft
+                cmd = line.strip()
+                if cmd == "/S":
+                    return True, work
+                if cmd == "/A":
+                    return False, entry
+                work = f"{work}\n{line}" if work else line
+                await self.bbs.send(session, render())
+            return False, work
         finally:
             session.suppress_echo = prev_suppress  # type: ignore[attr-defined]
 

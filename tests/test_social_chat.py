@@ -183,7 +183,7 @@ def test_echo_suppressed_during_chat_restored_after(tmp_path):
     asyncio.run(_a())
 
 
-# -- multi-line compose (B8 part 4: shift-enter newline, growing input) ------
+# -- multi-line compose (B8 part 4: Ctrl-Enter newline, growing input) -------
 
 
 def _run_chat(s, app, conv, keys):
@@ -362,3 +362,76 @@ def test_input_rows_clipped_to_cap_keeping_latest_lines(tmp_path):
     assert "L08" in final          # 25 logical lines - cap 18 -> starts at L08
     assert "L07" not in final      # oldest overflow clipped
     assert "> L08" not in final    # prompt marker scrolled off with its line
+
+
+def _run_chat_with_editor(s, app, conv, keys, lines):
+    """Drive _social_chat with scripted read_key AND read_command streams."""
+    p = app.get_plugin("mainmenu")
+    orig_rk, orig_rc = runner.read_key, runner.read_command
+
+    async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
+        return next(keys)
+
+    async def fake_rc(bbs, sess, timeout=runner.IDLE_TIMEOUT):
+        return next(lines)
+
+    runner.read_key, runner.read_command = fake_rk, fake_rc  # type: ignore[assignment]
+    try:
+        asyncio.run(p._social_chat(s, conv))
+    finally:
+        runner.read_key, runner.read_command = orig_rk, orig_rc  # type: ignore[assignment]
+
+
+def test_ctrl_e_opens_full_editor_and_sends_multiline(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    _run_chat_with_editor(
+        s, app, {"id": "b1", "title": "General"},
+        iter(["CTRL_E", "ESC"]), iter(["hello", "", "world", "/S"]))
+    text = _plain(s)
+    assert "EDITOR" in text and "/S=send" in text
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert msgs[-1]["body"] == "hello\n\nworld"   # blank line preserved
+    assert msgs[-1]["author"] == "dave"
+
+
+def test_full_editor_abort_restores_entry_draft(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    # draft "hi" before the editor; editor types "oops" then aborts;
+    # back in chat, ENTER must post the ENTRY draft, not the edit.
+    _run_chat_with_editor(
+        s, app, {"id": "b1", "title": "General"},
+        iter(["h", "i", "CTRL_E", "ENTER", "ESC"]),
+        iter(["oops", "/A"]))
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert msgs[-1]["body"] == "hi"
+
+
+def test_full_editor_eof_keeps_draft(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    s = _session(User(username="dave", groups=[]))
+    p = app.get_plugin("mainmenu")
+
+    async def _a():
+        orig = runner.read_command
+
+        async def fake_rc(bbs, sess, timeout=runner.IDLE_TIMEOUT):
+            return None  # disconnect mid-compose
+
+        runner.read_command = fake_rc  # type: ignore[assignment]
+        try:
+            posted, draft = await p._social_full_editor(
+                s, {"id": "b1", "title": "General"}, "seed text")
+        finally:
+            runner.read_command = orig  # type: ignore[assignment]
+        assert posted is False
+        assert draft == "seed text"
+        assert "EDITOR" in bytes(s.writer.buf).decode("cp437", errors="replace")
+
+    asyncio.run(_a())

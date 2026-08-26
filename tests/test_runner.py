@@ -175,7 +175,7 @@ def test_poll_timeout_returns_none_without_idle_notice():
     asyncio.run(_a())
 
 
-def test_lf_is_distinct_from_enter_for_shift_enter_newline():
+def test_lf_is_distinct_from_enter_for_ctrl_enter_newline():
     async def _a():
         r = _reader()
         r.feed_data("x\r\ny".encode("cp437"))
@@ -184,7 +184,21 @@ def test_lf_is_distinct_from_enter_for_shift_enter_newline():
         bb = RecordingBBS()
         assert await runner.read_key(bb, s, preserve_case=True) == "x"
         assert await runner.read_key(bb, s) == "ENTER"       # bare CR
-        assert await runner.read_key(bb, s) == "LF"          # bare LF (shift-enter)
+        assert await runner.read_key(bb, s) == "LF"          # bare LF (Ctrl-Enter)
         assert await runner.read_key(bb, s, preserve_case=True) == "y"
+
+    asyncio.run(_a())
+
+
+def test_ctrl_e_surfaces_for_full_editor():
+    async def _a():
+        r = _reader()
+        r.feed_data("a\x05b".encode("cp437"))
+        r.feed_eof()
+        s = _session(r)
+        bb = RecordingBBS()
+        assert await runner.read_key(bb, s) == "A"
+        assert await runner.read_key(bb, s) == "CTRL_E"
+        assert await runner.read_key(bb, s) == "B"
 
     asyncio.run(_a())
