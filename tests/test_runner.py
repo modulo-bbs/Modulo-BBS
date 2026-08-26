@@ -173,3 +173,18 @@ def test_poll_timeout_returns_none_without_idle_notice():
         assert not any("Idle timeout" in t for t in bb.sent)
 
     asyncio.run(_a())
+
+
+def test_lf_is_distinct_from_enter_for_shift_enter_newline():
+    async def _a():
+        r = _reader()
+        r.feed_data("x\r\ny".encode("cp437"))
+        r.feed_eof()
+        s = _session(r)
+        bb = RecordingBBS()
+        assert await runner.read_key(bb, s, preserve_case=True) == "x"
+        assert await runner.read_key(bb, s) == "ENTER"       # bare CR
+        assert await runner.read_key(bb, s) == "LF"          # bare LF (shift-enter)
+        assert await runner.read_key(bb, s, preserve_case=True) == "y"
+
+    asyncio.run(_a())

@@ -8,7 +8,7 @@
 |---|---|---|
 | 0 | Foundation: event bus, user model, plugin base, loader, auth, session binding | **COMPLETE** (Tasks 1–6 below, shipped, 246 tests at `15bd54c`) |
 | 1 | One-API + screens + tabbed PIM home | **COMPLETE** (Steps 1–11 below; PIM home shipped through `32ca439`, 2026-08-25) |
-| 2 | Boards → Social unification (`.hermes/plans/2026-08-25_150714-boards-unification.md`) | **COMPLETE** — A1–A4 + B0–B6 landed 2026-08-25 (`4afe66c`…`9dda401`); B7 Syncterm pass pending Dave. Tab row: Dashboard \| Social \| Files \| Bulletins; DMs pinned inside Social (OQ2). **B8 divergence (same evening, per Dave):** Telegram-style chat replaces the classic reader — type-at-prompt posting, tail-anchored history, 1s polling with NEW badges, compact bubble previews (`d63f8bf`→). |
+| 2 | Boards → Social unification (`.hermes/plans/2026-08-25_150714-boards-unification.md`) | **COMPLETE** — A1–A4 + B0–B6 landed 2026-08-25 (`4afe66c`…`9dda401`); B7 Syncterm pass pending Dave. Tab row: Dashboard \| Social \| Files \| Bulletins; DMs pinned inside Social (OQ2). **B8 divergence (same evening, per Dave):** Telegram-style chat replaces the classic reader — type-at-prompt posting, tail-anchored history, 1s polling with NEW badges, compact bubble previews (`d63f8bf`→). **B8 part 4:** shift-enter (LF) multi-line compose — draft box word-wraps and grows upward over bubbles, Enter posts with line breaks intact. |
 
 Historical Tasks 1–6 are retained below as the record of the foundation build. Current roadmap is Phase 1.
 

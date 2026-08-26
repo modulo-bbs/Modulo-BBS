@@ -648,25 +648,40 @@ class MainmenuPlugin(Plugin):
             return
 
     async def _social_chat(self, session, conv: dict) -> None:
-        """Telegram-style chat (B8): bubble history + bottom input line.
+        """Telegram-style chat (B8): bubble history + bottom input area.
 
-        You just type; Enter posts. UP/DOWN scroll back through history
-        (entry is always tail-anchored), PgUp/PgDn page, ESC leaves.
-        While idle the loop polls the store once a second, so messages
-        from other nodes/sessions appear as *NEW* bubbles on every view.
-        Replaces the classic reader for Social rooms (Dave: "type and
-        press enter" — R-reply retired).
+        You just type; Enter posts. Shift-Enter (LF) inserts a newline and
+        the input area grows upward, overwriting bubble rows until sent.
+        UP/DOWN scroll back through history (entry is always tail-anchored),
+        PgUp/PgDn page, ESC leaves. While idle the loop polls the store once
+        a second, so messages from other nodes/sessions appear as *NEW*
+        bubbles on every view.
         """
         import time
 
         from plugins.mainmenu.bubbles import render_bubbles
+        from shared.textwrap import wrap as _tw_wrap
 
         cid = conv["id"]
         uname = getattr(getattr(session, "user", None), "username", "") or ""
         h = int(getattr(session, "terminal_height", 24) or 24)
         w = 79
         is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
-        budget = max(6, h - 3)  # header + status + prompt own the rest
+        G = "" if is_plain else ANSI.BRIGHT_GREEN
+        R = "" if is_plain else ANSI.RESET
+
+        def input_rows(d: str) -> list[str]:
+            """Physical rows of the input area: '> ' first, wrap at width."""
+            # header(1) + bubble-budget floor(4) + status(1) + rows <= h
+            cap = max(1, h - 6)
+            phys: list[str] = []
+            for i, ln in enumerate(d.split("\n")):
+                segs = _tw_wrap(ln, w - 2) or [""]
+                for j, seg in enumerate(segs):
+                    phys.append(("> " if i == 0 and j == 0 else "  ") + seg)
+            if len(phys) > cap:
+                phys = phys[-cap:]
+            return phys or ["> "]
 
         prev_suppress = getattr(session, "suppress_echo", False)
         session.suppress_echo = True  # type: ignore[attr-defined]
@@ -678,19 +693,22 @@ class MainmenuPlugin(Plugin):
             baseline = max((int(m.get("id", 0)) for m in msgs), default=0)
             scroll_back = 0
             draft = ""
+            rows = input_rows(draft)
             last_fp = None
             last_key_at = time.monotonic()
+            await self.bbs.send(session, "\x1b[2J\x1b[H")
 
             while getattr(session, "is_active", True):
                 try:
                     msgs = await self.bbs.conversations.list_messages(cid)
                 except Exception:
                     msgs = []
-                fp = (len(msgs), max((int(m.get("id", 0)) for m in msgs), default=0))
+                fp = (len(msgs), max((int(m.get("id", 0)) for m in msgs), default=0), len(rows))
                 dirty = fp != last_fp
                 last_fp = fp
 
                 if dirty:
+                    budget = max(4, h - 2 - len(rows))
                     groups: list[list[str]] = []
                     used = 0
                     window = msgs[max(0, len(msgs) - scroll_back - budget):
@@ -709,7 +727,7 @@ class MainmenuPlugin(Plugin):
 
                     new_count = sum(1 for m in msgs if int(m.get("id", 0)) > baseline)
                     title = str(conv.get("title", cid))
-                    head = f" {title} - {len(msgs)} msgs - type & Enter sends, ESC back "
+                    head = f" {title} - {len(msgs)} msgs - Enter send / Shift-Enter newline / ESC back "
                     status_parts = []
                     if scroll_back:
                         status_parts.append(f"history: {scroll_back} newer hidden - DOWN/PgDn")
@@ -717,14 +735,12 @@ class MainmenuPlugin(Plugin):
                         status_parts.append(f"{new_count} NEW")
                     status = ("  ".join(status_parts)) if (scroll_back or new_count) else ""
 
-                    G = "" if is_plain else ANSI.BRIGHT_GREEN
-                    R = "" if is_plain else ANSI.RESET
                     lines = [head[:w].ljust(w)]
                     lines.extend(vis_rows[:budget])
-                    while len(lines) < h:
+                    while len(lines) < 1 + budget:
                         lines.append(" " * w)
-                    lines[h - 2] = status[:w].ljust(w)
-                    lines[h - 1] = f"{G}>{R} {draft}"
+                    lines.append(status[:w].ljust(w))
+                    lines.extend(rows)
                     await self.bbs.send(
                         session,
                         "\x1b[2J\x1b[H" + "\x1b[K\r\n".join(lines[:h]),
@@ -740,14 +756,21 @@ class MainmenuPlugin(Plugin):
                     continue
                 last_key_at = time.monotonic()
 
-                def _prompt_redraw():
-                    G = "" if is_plain else ANSI.BRIGHT_GREEN
-                    R = "" if is_plain else ANSI.RESET
-                    return self_bbs_send(f"\r\x1b[2K{G}>{R} {draft}")
+                async def redraw_input() -> None:
+                    # Erase from the top of the LARGER area (old or new) so
+                    # shrinking drafts leave no stale rows behind.
+                    start = h - max(len(rows), 1) + 1
+                    await self.bbs.send(
+                        session, f"\x1b[{start};1H\x1b[J" + "\r\n".join(rows))
 
                 if key == "ESC":
                     break
                 if key == "ENTER":
+                    # Swallow a client's trailing LF after CR (\r\n Enter);
+                    # a deliberate Shift-Enter LF only comes after more keys.
+                    stash = getattr(session, "_line_buffer", "")
+                    if stash.startswith("\n"):
+                        session._line_buffer = stash[1:]
                     body = draft.strip()
                     if body:
                         await self.bbs.conversations.post_message(
@@ -760,13 +783,22 @@ class MainmenuPlugin(Plugin):
                         baseline = max((int(m.get("id", 0)) for m in fresh), default=baseline)
                         scroll_back = 0
                         draft = ""
-                        last_fp = None  # force repaint
+                        rows = input_rows(draft)
+                        last_fp = None
+                elif key == "LF":
+                    draft += "\n"
+                    rows = input_rows(draft)
+                    await redraw_input()
                 elif key == "BACKSPACE":
                     if draft:
                         draft = draft[:-1]
-                        G = "" if is_plain else ANSI.BRIGHT_GREEN
-                        R = "" if is_plain else ANSI.RESET
-                        await self.bbs.send(session, f"\r\x1b[2K{G}>{R} {draft}")
+                        new_rows = input_rows(draft)
+                        grew = len(new_rows) != len(rows)
+                        rows = new_rows
+                        if grew:
+                            last_fp = None  # bubble budget changed: full repaint
+                        else:
+                            await redraw_input()
                 elif key == "UP":
                     scroll_back = min(len(msgs), scroll_back + 1)
                     last_fp = None
@@ -781,15 +813,14 @@ class MainmenuPlugin(Plugin):
                     last_fp = None
                 elif key == "SPACE":
                     draft += " "
-                    G = "" if is_plain else ANSI.BRIGHT_GREEN
-                    R = "" if is_plain else ANSI.RESET
-                    await self.bbs.send(session, f"\r\x1b[2K{G}>{R} {draft}")
+                    rows = input_rows(draft)
+                    await redraw_input()
                 elif len(key) == 1 and key.isprintable():
                     draft += key
-                    G = "" if is_plain else ANSI.BRIGHT_GREEN
-                    R = "" if is_plain else ANSI.RESET
-                    await self.bbs.send(session, f"\r\x1b[2K{G}>{R} {draft}")
+                    rows = input_rows(draft)
+                    await redraw_input()
                 # anything else: ignore
+
             # exit — remember where "new" ends for the two-pane preview
             try:
                 await self.bbs.conversations.mark_read(uname, cid)

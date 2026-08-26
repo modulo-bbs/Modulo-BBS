@@ -209,9 +209,12 @@ async def read_key(
             # window to complete the sequence; silence means lone ESC (B0).
             pending_esc = True
             break
-        if buf[0] in ("\r", "\n"):
+        if buf[0] == "\r":
             session._line_buffer = buf[1:]
             return "ENTER"
+        if buf[0] == "\n":
+            session._line_buffer = buf[1:]
+            return "LF"  # shift-enter (SyncTERM): newline inside a draft
         if buf[0] == " ":
             session._line_buffer = buf[1:]
             return "SPACE"  # B4: PgDn alias on Social
@@ -262,9 +265,12 @@ async def read_key(
                 continue
             return key
         for i, ch in enumerate(buf):
-            if ch in ("\r", "\n"):
+            if ch == "\r":
                 session._line_buffer = buf[i + 1 :]
                 return "ENTER"
+            if ch == "\n":
+                session._line_buffer = buf[i + 1 :]
+                return "LF"  # shift-enter (SyncTERM): newline inside a draft
             if ch == " ":
                 session._line_buffer = buf[i + 1 :]
                 return "SPACE"  # B4: PgDn alias on Social

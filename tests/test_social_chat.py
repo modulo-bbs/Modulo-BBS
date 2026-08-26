@@ -181,3 +181,130 @@ def test_echo_suppressed_during_chat_restored_after(tmp_path):
         assert not getattr(s, "suppress_echo", False)
 
     asyncio.run(_a())
+
+
+# -- multi-line compose (B8 part 4: shift-enter newline, growing input) ------
+
+
+def _run_chat(s, app, conv, keys):
+    p = app.get_plugin("mainmenu")
+    orig = runner.read_key
+
+    async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
+        return next(keys)
+
+    runner.read_key = fake_rk  # type: ignore[assignment]
+    try:
+        asyncio.run(p._social_chat(s, conv))
+    finally:
+        runner.read_key = orig  # type: ignore[assignment]
+
+
+def _plain(s):
+    import re as _re
+
+    return _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "",
+                   bytes(s.writer.buf).decode("cp437", errors="replace"))
+
+
+def test_lf_inserts_newline_and_input_area_grows(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    _run_chat(s, app, {"id": "b1", "title": "General"},
+              iter(["h", "i", "LF", "y", "o", "ESC"]))
+    text = _plain(s)
+    assert "> hi" in text          # first physical input row
+    assert "  yo" in text          # newline opened a second input row
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert len(msgs) == 1          # ESC never posts
+
+
+def test_long_line_wraps_into_extra_row_at_77_cols(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    keys = ["x"] * 78 + ["ESC"]
+    _run_chat(s, app, {"id": "b1", "title": "General"}, iter(keys))
+    text = _plain(s)
+    # '> ' + 77 wrapped columns, continuation on its own '  '-prefixed row
+    assert "> " + "x" * 77 + "\r\n  x" in text
+
+
+def test_enter_posts_multiline_body_with_newlines_intact(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    _run_chat(s, app, {"id": "b1", "title": "General"},
+              iter(["a", "LF", "b", "ENTER", "ESC"]))
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert msgs[-1]["body"] == "a\nb"
+    assert msgs[-1]["author"] == "dave"
+
+
+def test_newline_only_draft_is_not_posted(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    _run_chat(s, app, {"id": "b1", "title": "General"},
+              iter(["LF", "ENTER", "ESC"]))
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert len(msgs) == 1          # only the seeded message
+
+
+def test_crlf_trailing_lf_does_not_leak_into_next_draft(tmp_path):
+    """Real CRLF clients leave '\n' in the stash after Enter's '\r'; it must
+    be swallowed on send, or the next draft starts with a phantom newline."""
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+
+    async def _a():
+        keys = iter(["h", "i", "ENTER", "o", "ENTER", "ESC"])
+        orig = runner.read_key
+
+        async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
+            key = next(keys)
+            # simulate a CRLF client: Enter's \r consumed, \n stashed behind
+            if key == "ENTER":
+                sess._line_buffer = "\n"
+            return key
+
+        runner.read_key = fake_rk  # type: ignore[assignment]
+        try:
+            await app.get_plugin("mainmenu")._social_chat(
+                s, {"id": "b1", "title": "General"})
+        finally:
+            runner.read_key = orig  # type: ignore[assignment]
+
+    asyncio.run(_a())
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert msgs[-2]["body"] == "hi"
+    assert msgs[-1]["body"] == "o"          # not "\no"
+
+
+def test_input_rows_clipped_to_cap_keeping_latest_lines(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)             # 24 rows -> cap 18
+    keys: list[str] = []
+    for n in range(1, 26):
+        keys.extend(f"L{n:02d}")
+        if n < 25:
+            keys.append("LF")
+    _run_chat(s, app, {"id": "b1", "title": "General"}, iter(keys + ["ESC"]))
+    raw = bytes(s.writer.buf).decode("cp437", errors="replace")
+    # final input-area state = everything after the last erase-to-end
+    import re as _re
+
+    final = _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", raw.rsplit("\x1b[J", 1)[-1])
+    assert "L25" in final          # newest lines survive
+    assert "L08" in final          # 25 logical lines - cap 18 -> starts at L08
+    assert "L07" not in final      # oldest overflow clipped
+    assert "> L08" not in final    # prompt marker scrolled off with its line
