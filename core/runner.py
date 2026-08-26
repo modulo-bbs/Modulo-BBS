@@ -117,7 +117,10 @@ async def _read_chunk(bbs, session, timeout, *, idle_on_timeout=True):
     # Echo the CLEAN bytes only -- never raw IAC negotiation, which was the
     # source of the CP437 glyph garbage. Printable chars echo as-is; CR/LF
     # becomes CRLF; Backspace erases in place; ESC sequences pass silent.
-    if not getattr(session, "transport_echoes", False):
+    # Chat mode (suppress_echo) paints its own feedback instead.
+    if not getattr(session, "transport_echoes", False) and not getattr(
+        session, "suppress_echo", False
+    ):
         echo = bytearray()
         i = 0
         while i < len(clean):

@@ -29,7 +29,7 @@ PANE_CELL = 54
 SID_INNER = SID_CELL - 2   # text width after the padding spaces
 PANE_INNER = PANE_CELL - 2
 
-SOCIAL_HINT = "  Enter open · Up/Dn rooms · Space/PgUp/PgDn scroll · R reply · N new · D del · ESC back"[:79]
+SOCIAL_HINT = "  Enter chat · Up/Dn rooms · N new thread · Space/PgUp/PgDn peek · ESC back"[:79]
 
 
 @dataclass

@@ -590,22 +590,16 @@ class MainmenuPlugin(Plugin):
             session._social_scroll_up = 0  # type: ignore[attr-defined]
             return True
         if key == "ENTER":
-            # Enter opens the highlighted room full-screen (the pane already
-            # live-follows selection; this is the explicit "go inside").
+            # Enter = enter the room's chat (B8). The pane already
+            # live-previews; this is the full Telegram-style surface.
             conv = await self._social_target_conv(session, rooms, sel)
             if conv is None:
                 await self.bbs.send(session, "\r\n(no room selected)\r\n")
                 return True
-            await self._thread_reader(session, conv)
+            await self._social_chat(session, conv)
             return True
         if key == "N":
             await self._social_new_thread(session)
-            return True
-        if key == "R":
-            await self._social_compose(session, rooms, sel, delete=False)
-            return True
-        if key == "D":
-            await self._social_compose(session, rooms, sel, delete=True)
             return True
         return False
 
@@ -653,56 +647,155 @@ class MainmenuPlugin(Plugin):
             await self.bbs.send(session, f"Thread '{title}' created.\r\n")
             return
 
-    async def _social_compose(self, session, rooms, sel, *, delete: bool):
-        """R = post into the highlighted room; D = delete one of your posts
-        (or any, for moderators). Both are LINE-mode compose flows."""
-        conv = await self._social_target_conv(session, rooms, sel)
-        if conv is None:
-            await self.bbs.send(session, "\r\n(no room selected)\r\n")
-            return
-        if not delete:
-            await self.bbs.send(
-                session,
-                f"\r\nMessage to {conv['title']} — empty line sends, /A aborts.\r\n",
-            )
-            lines: list[str] = []
-            while True:
-                line = await runner.read_command(self.bbs, session)
-                if line is None:
-                    return
-                if line.strip().upper() == "/A":
-                    await self.bbs.send(session, "\r\nAborted.\r\n")
-                    return
-                if not line.strip():
-                    break
-                lines.append(line)
-            body = "\n".join(lines).strip()
-            if not body:
-                await self.bbs.send(session, "\r\n(empty — nothing posted)\r\n")
-                return
-            await self.bbs.conversations.post_message(
-                conv["id"], author=session.user.username, body=body)
+    async def _social_chat(self, session, conv: dict) -> None:
+        """Telegram-style chat (B8): bubble history + bottom input line.
+
+        You just type; Enter posts. UP/DOWN scroll back through history
+        (entry is always tail-anchored), PgUp/PgDn page, ESC leaves.
+        While idle the loop polls the store once a second, so messages
+        from other nodes/sessions appear as *NEW* bubbles on every view.
+        Replaces the classic reader for Social rooms (Dave: "type and
+        press enter" — R-reply retired).
+        """
+        import time
+
+        from plugins.mainmenu.bubbles import render_bubbles
+
+        cid = conv["id"]
+        uname = getattr(getattr(session, "user", None), "username", "") or ""
+        h = int(getattr(session, "terminal_height", 24) or 24)
+        w = 79
+        is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
+        budget = max(6, h - 3)  # header + status + prompt own the rest
+
+        prev_suppress = getattr(session, "suppress_echo", False)
+        session.suppress_echo = True  # type: ignore[attr-defined]
+        try:
             try:
-                await self.bbs.conversations.mark_read(session.user.username, conv["id"])
+                msgs = await self.bbs.conversations.list_messages(cid)
+            except Exception:
+                msgs = []
+            baseline = max((int(m.get("id", 0)) for m in msgs), default=0)
+            scroll_back = 0
+            draft = ""
+            last_fp = None
+            last_key_at = time.monotonic()
+
+            while getattr(session, "is_active", True):
+                try:
+                    msgs = await self.bbs.conversations.list_messages(cid)
+                except Exception:
+                    msgs = []
+                fp = (len(msgs), max((int(m.get("id", 0)) for m in msgs), default=0))
+                dirty = fp != last_fp
+                last_fp = fp
+
+                if dirty:
+                    groups: list[list[str]] = []
+                    used = 0
+                    window = msgs[max(0, len(msgs) - scroll_back - budget):
+                                  len(msgs) - scroll_back] or msgs[:1]
+                    for m in reversed(window):
+                        grows = render_bubbles(
+                            [m], w, username=uname,
+                            new_from_id=baseline + 1, plain=is_plain)
+                        if used + len(grows) > budget:
+                            break
+                        groups.append(grows)
+                        used += len(grows)
+                    vis_rows: list[str] = []
+                    for grows in reversed(groups):
+                        vis_rows.extend(grows)
+
+                    new_count = sum(1 for m in msgs if int(m.get("id", 0)) > baseline)
+                    title = str(conv.get("title", cid))
+                    head = f" {title} - {len(msgs)} msgs - type & Enter sends, ESC back "
+                    status_parts = []
+                    if scroll_back:
+                        status_parts.append(f"history: {scroll_back} newer hidden - DOWN/PgDn")
+                    if new_count:
+                        status_parts.append(f"{new_count} NEW")
+                    status = ("  ".join(status_parts)) if (scroll_back or new_count) else ""
+
+                    G = "" if is_plain else ANSI.BRIGHT_GREEN
+                    R = "" if is_plain else ANSI.RESET
+                    lines = [head[:w].ljust(w)]
+                    lines.extend(vis_rows[:budget])
+                    while len(lines) < h:
+                        lines.append(" " * w)
+                    lines[h - 2] = status[:w].ljust(w)
+                    lines[h - 1] = f"{G}>{R} {draft}"
+                    await self.bbs.send(
+                        session,
+                        "\x1b[2J\x1b[H" + "\x1b[K\r\n".join(lines[:h]),
+                    )
+
+                key = await runner.read_key(
+                    self.bbs, session,
+                    timeout=1.0, preserve_case=True, idle_on_timeout=False,
+                )
+                if key is None:
+                    if time.monotonic() - last_key_at > runner.IDLE_TIMEOUT:
+                        break
+                    continue
+                last_key_at = time.monotonic()
+
+                def _prompt_redraw():
+                    G = "" if is_plain else ANSI.BRIGHT_GREEN
+                    R = "" if is_plain else ANSI.RESET
+                    return self_bbs_send(f"\r\x1b[2K{G}>{R} {draft}")
+
+                if key == "ESC":
+                    break
+                if key == "ENTER":
+                    body = draft.strip()
+                    if body:
+                        await self.bbs.conversations.post_message(
+                            cid, author=uname or "anonymous", body=draft.rstrip())
+                        try:
+                            await self.bbs.conversations.mark_read(uname, cid)
+                        except Exception:
+                            pass
+                        fresh = await self.bbs.conversations.list_messages(cid)
+                        baseline = max((int(m.get("id", 0)) for m in fresh), default=baseline)
+                        scroll_back = 0
+                        draft = ""
+                        last_fp = None  # force repaint
+                elif key == "BACKSPACE":
+                    if draft:
+                        draft = draft[:-1]
+                        G = "" if is_plain else ANSI.BRIGHT_GREEN
+                        R = "" if is_plain else ANSI.RESET
+                        await self.bbs.send(session, f"\r\x1b[2K{G}>{R} {draft}")
+                elif key == "UP":
+                    scroll_back = min(len(msgs), scroll_back + 1)
+                    last_fp = None
+                elif key == "DOWN":
+                    scroll_back = max(0, scroll_back - 1)
+                    last_fp = None
+                elif key == "PGUP":
+                    scroll_back = min(len(msgs), scroll_back + max(5, h - 6))
+                    last_fp = None
+                elif key == "PGDN":
+                    scroll_back = max(0, scroll_back - max(5, h - 6))
+                    last_fp = None
+                elif key == "SPACE":
+                    draft += " "
+                    G = "" if is_plain else ANSI.BRIGHT_GREEN
+                    R = "" if is_plain else ANSI.RESET
+                    await self.bbs.send(session, f"\r\x1b[2K{G}>{R} {draft}")
+                elif len(key) == 1 and key.isprintable():
+                    draft += key
+                    G = "" if is_plain else ANSI.BRIGHT_GREEN
+                    R = "" if is_plain else ANSI.RESET
+                    await self.bbs.send(session, f"\r\x1b[2K{G}>{R} {draft}")
+                # anything else: ignore
+            try:
+                await self.bbs.conversations.mark_read(uname, cid)
             except Exception:
                 pass
-            session._social_scroll_up = 0  # show the new post (tail anchor)
-            await self.bbs.send(session, "\r\nPosted.\r\n")
-            return
-        await self.bbs.send(session, "\r\nDelete message #: ")
-        raw = await runner.read_command(self.bbs, session)
-        if raw is None or not raw.strip().isdigit():
-            return
-        mid = int(raw.strip())
-        try:
-            ok = await self.bbs.conversations.delete_message(
-                conv["id"], mid, by_user=session.user)
-            await self.bbs.send(
-                session, f"\r\n{'Deleted #' + str(mid) if ok else 'No such message.'}\r\n")
-        except PermissionError as e:
-            await self.bbs.send(session, f"\r\nNot allowed: {e}\r\n")
-        except Exception as e:  # noqa: BLE001
-            await self.bbs.send(session, f"\r\nFailed: {e}\r\n")
+        finally:
+            session.suppress_echo = prev_suppress  # type: ignore[attr-defined]
 
     async def _open_selected(self, session, tab: dict) -> None:
         """Open the highlighted conversation in a full-screen reader.

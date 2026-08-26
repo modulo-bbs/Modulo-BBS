@@ -154,7 +154,9 @@ def test_n_creates_thread_enforcing_title_cap(tmp_path):
     asyncio.run(_a())
 
 
-def test_r_posts_reply_and_marks_read(tmp_path):
+def test_r_and_d_retired_from_social_fall_through(tmp_path):
+    """B8: R/D compose keys are gone — messaging lives in chat mode
+    (Enter). Unhandled keys fall through to the generic PIM layer."""
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
@@ -162,26 +164,13 @@ def test_r_posts_reply_and_marks_read(tmp_path):
     p = app.get_plugin("mainmenu")
 
     async def _a():
-        s._pim_selected = 1  # b1 (has ana's unread post)
-        lines = iter(["my reply here", ""])
-        orig = runner.read_command
-
-        async def fake_rc(bbs, session, timeout=runner.IDLE_TIMEOUT):
-            return next(lines)
-
-        runner.read_command = fake_rc  # type: ignore[assignment]
-        try:
-            assert await p._handle_pim_key(s, "R") is True
-        finally:
-            runner.read_command = orig  # type: ignore[assignment]
-        msgs = await app.conversations.list_messages("b1")
-        assert any(m["body"] == "my reply here" for m in msgs)
-        assert await app.conversations.unread_count("dave", "b1") == 0
+        assert await p._handle_pim_key(s, "R") is False
+        assert await p._handle_pim_key(s, "D") is False
 
     asyncio.run(_a())
 
 
-def test_enter_opens_thread_reader_and_esc_returns(tmp_path):
+def test_enter_opens_chat_and_esc_returns(tmp_path):
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
@@ -194,17 +183,17 @@ def test_enter_opens_thread_reader_and_esc_returns(tmp_path):
 
         orig = runner.read_key
 
-        async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT):
-            return "ESC"  # leave the reader on its first prompt
+        async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
+            return "ESC"  # leave chat on its first prompt
 
         runner.read_key = fake_rk  # type: ignore[assignment]
         try:
             assert await p._handle_pim_key(s, "ENTER") is True
         finally:
             runner.read_key = orig  # type: ignore[assignment]
-        text = bytes(s.writer.buf).decode("utf-8", errors="replace")
-        # full-screen reader rendered the actual thread
-        assert "First Board" in text and "hello" in text
+        text = bytes(s.writer.buf).decode("cp437", errors="replace")
+        # chat surface rendered the room with bubbles + input prompt
+        assert "First Board" in text and ">" in text
         # entering cleared unread
         assert await app.conversations.unread_count("dave", "b1") == 0
 
