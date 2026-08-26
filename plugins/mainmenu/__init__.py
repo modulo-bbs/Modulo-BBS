@@ -590,7 +590,13 @@ class MainmenuPlugin(Plugin):
             session._social_scroll_up = 0  # type: ignore[attr-defined]
             return True
         if key == "ENTER":
-            # Selection already re-renders live; Enter has no job here.
+            # Enter opens the highlighted room full-screen (the pane already
+            # live-follows selection; this is the explicit "go inside").
+            conv = await self._social_target_conv(session, rooms, sel)
+            if conv is None:
+                await self.bbs.send(session, "\r\n(no room selected)\r\n")
+                return True
+            await self._thread_reader(session, conv)
             return True
         if key == "N":
             await self._social_new_thread(session)
@@ -721,7 +727,15 @@ class MainmenuPlugin(Plugin):
         sel = getattr(session, "_pim_selected", 0)
         sel = max(0, min(sel, len(convs) - 1))
         conv = convs[sel]
-        # mark as read so Dashboard digest clears on return (quick-link)
+        await self._thread_reader(session, conv)
+
+    async def _thread_reader(self, session, conv: dict) -> None:
+        """Full-screen paged thread view for one conversation.
+
+        Shared by the classic tab flow (_open_selected) and Social's
+        ENTER-to-open. Q/ESC back out to whatever invoked it.
+        """
+        # mark as read on entry so digests/quick-links clear on return
         try:
             uname = getattr(getattr(session, "user", None), "username", None)
             if uname:
@@ -763,10 +777,10 @@ class MainmenuPlugin(Plugin):
                     line = f"{indent}#{m.get('id', '?')} [{author}] {created}  {body}"
                     await self.bbs.send(session, line[:79] + "\r\n")
             await self.bbs.send(session, "─" * 79 + "\r\n")
-            await self.bbs.send(session, " R)reply  D)delete  F)find  N)next P)prev  Q)back\r\n")
+            await self.bbs.send(session, " R)reply  D)delete  F)find  N)next P)prev  ESC/Q back\r\n")
             await self.bbs.send(session, f"\x1b[{getattr(session, 'terminal_height', 24)};1H\x1b[2K\x1b[92m  >\x1b[0m")
             key = await runner.read_key(self.bbs, session)
-            if key is None or key == "Q":
+            if key is None or key == "Q" or key == "ESC":
                 return
             if key == "N":
                 if page + 1 < total_pages:
@@ -865,7 +879,6 @@ class MainmenuPlugin(Plugin):
                     await runner.read_key(self.bbs, session)
                 continue
             # numeric -> jump to page? ignore, prompt already handles
-
     async def _show_menu(self, session) -> None:
         """Clear screen, render the home surface, show a bottom-aligned ``>`` prompt.
 

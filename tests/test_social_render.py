@@ -96,7 +96,7 @@ def test_plain_layout_widths_and_rows():
         # sidebar furniture
         assert "DMs" in joined and "+ new thread" in joined
         # board row selected marker + unread star, title capped at 15
-        assert "► General Discuss" in joined and "*" in joined
+        assert "> General Discuss" in joined and "*" in joined
         # thread pane header + message meta line
         assert "(2 msgs)" in joined
         assert "#1 [dave]" in joined and "08-22 20:27" in joined

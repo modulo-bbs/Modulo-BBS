@@ -181,6 +181,36 @@ def test_r_posts_reply_and_marks_read(tmp_path):
     asyncio.run(_a())
 
 
+def test_enter_opens_thread_reader_and_esc_returns(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _social_session(dave)
+    p = app.get_plugin("mainmenu")
+
+    async def _a():
+        s._pim_selected = 1  # b1 (has ana's post)
+        import core.runner as runner
+
+        orig = runner.read_key
+
+        async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT):
+            return "ESC"  # leave the reader on its first prompt
+
+        runner.read_key = fake_rk  # type: ignore[assignment]
+        try:
+            assert await p._handle_pim_key(s, "ENTER") is True
+        finally:
+            runner.read_key = orig  # type: ignore[assignment]
+        text = bytes(s.writer.buf).decode("utf-8", errors="replace")
+        # full-screen reader rendered the actual thread
+        assert "First Board" in text and "hello" in text
+        # entering cleared unread
+        assert await app.conversations.unread_count("dave", "b1") == 0
+
+    asyncio.run(_a())
+
+
 def test_esc_returns_to_dashboard(tmp_path):
     app = _app(tmp_path)
     _seed(app)

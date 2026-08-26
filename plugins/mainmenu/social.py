@@ -7,7 +7,7 @@ the PIM dispatcher.
 
 Sidebar shape (per plan §Design):
 
-    ► DMs            N   ← pinned aggregate (all kind=dm convs)
+    > DMs             N   <- pinned aggregate (all kind=dm convs)
       + new thread       ← UI action row, added by the renderer
     ──────────────────
       1 General Dis…  *  ← kind=board rooms by recent activity
@@ -29,7 +29,7 @@ PANE_CELL = 54
 SID_INNER = SID_CELL - 2   # text width after the padding spaces
 PANE_INNER = PANE_CELL - 2
 
-SOCIAL_HINT = "  Up/Dn rooms · Space/PgUp/PgDn scroll · R reply · N new · D del · ESC back"
+SOCIAL_HINT = "  Enter open · Up/Dn rooms · Space/PgUp/PgDn scroll · R reply · N new · D del · ESC back"[:79]
 
 
 @dataclass
@@ -212,12 +212,12 @@ async def render_social(conversations, session) -> str:
     overflow = max(0, len(boards) - (sidebar_slots - 1))
     shown = boards[: max(0, sidebar_slots - 1 - (1 if overflow else 0))]
 
-    marker = "►" if sel == 0 else " "
+    marker = ">" if sel == 0 else " "
     side.append(f"{marker} {'DMs':<15}{dms_unread:>3}")
     side.append("  + new thread")
     side.append("─" * SID_INNER if not is_plain else "-" * SID_INNER)
     for i, r in enumerate(shown):
-        marker = "►" if sel == i + 1 else " "
+        marker = ">" if sel == i + 1 else " "
         star = "*" if r.unread else " "
         side.append(f"{marker} {r.title:<15}{star}")
     if overflow:
