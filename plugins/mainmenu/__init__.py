@@ -673,7 +673,12 @@ class MainmenuPlugin(Plugin):
         R = "" if is_plain else ANSI.RESET
 
         def input_rows(d: str) -> list[str]:
-            """Physical rows of the input area: '> ' first, wrap at width."""
+            """Physical rows of the input area: '> ' first, wrap at width.
+
+            Drafts taller than 3 rows (e.g. carried back from the overlay
+            editor) collapse to a one-line preview + the last 2 rows, so a
+            big draft never walls over the bubble thread.
+            """
             # header(1) + bubble-budget floor(4) + status(1) + rows <= h
             cap = max(1, h - 6)
             phys: list[str] = []
@@ -683,6 +688,8 @@ class MainmenuPlugin(Plugin):
                     phys.append(("> " if i == 0 and j == 0 else "  ") + seg)
             if len(phys) > cap:
                 phys = phys[-cap:]
+            if len(phys) > 3:
+                phys = [f"> [{len(phys)} lines - Ctrl-E to view]"] + phys[-2:]
             return phys or ["> "]
 
         prev_suppress = getattr(session, "suppress_echo", False)
@@ -867,9 +874,9 @@ class MainmenuPlugin(Plugin):
         inside it from the top with soft wrap. Notepad-style caret editing:
         arrows move the caret anywhere in the box, Enter opens a line,
         Backspace joins, typing inserts at the caret. Capacity is capped to
-        the box — an edit that would not fit is refused. Ctrl-Enter sends;
-        ESC or Ctrl-E returns to chat keeping the draft.
-        Returns (sent, draft).
+        the box — an edit that would not fit is refused.
+        ESC or Ctrl-Enter sends; Ctrl-E returns to chat keeping the draft
+        (Dave: ESC is the save key). Returns (sent, draft).
         """
         import time
 
@@ -929,9 +936,9 @@ class MainmenuPlugin(Plugin):
             last_key_at = time.monotonic()
             rows = wrap_rows(text, inner_w)
 
-            if key == "LF":
-                return True, text           # Ctrl-Enter: send
-            if key in ("ESC", "CTRL_E"):
+            if key == "LF" or key == "ESC":
+                return True, text           # send (Dave: ESC is the save key)
+            if key == "CTRL_E":
                 return False, text          # back to chat, draft kept
             if key == "ENTER":
                 # Swallow a CRLF client's trailing LF (same as the chat's

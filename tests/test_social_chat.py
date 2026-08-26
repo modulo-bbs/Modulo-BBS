@@ -342,11 +342,11 @@ def test_no_emitted_segment_exceeds_79_visible_columns(tmp_path):
                     f"col={col} near {raw[max(0, raw.find(tok)-40):raw.find(tok)+20]!r}")
 
 
-def test_input_rows_clipped_to_cap_keeping_latest_lines(tmp_path):
+def test_input_rows_compacts_tall_draft_keeping_latest_lines(tmp_path):
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
-    s = _session(dave)             # 24 rows -> cap 18
+    s = _session(dave)             # 24 rows -> cap 18, then compact to 3
     keys: list[str] = []
     for n in range(1, 26):
         keys.extend(f"L{n:02d}")
@@ -358,10 +358,9 @@ def test_input_rows_clipped_to_cap_keeping_latest_lines(tmp_path):
     import re as _re
 
     final = _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", raw.rsplit("\x1b[J", 1)[-1])
-    assert "L25" in final          # newest lines survive
-    assert "L08" in final          # 25 logical lines - cap 18 -> starts at L08
-    assert "L07" not in final      # oldest overflow clipped
-    assert "> L08" not in final    # prompt marker scrolled off with its line
+    assert "> [18 lines - Ctrl-E to view]" in final
+    assert "L25" in final and "L24" in final   # newest lines survive
+    assert "L01" not in final and "L08" not in final  # older rows hidden
 
 
 def _run_chat_with_editor(s, app, conv, keys):
@@ -393,17 +392,45 @@ def test_ctrl_e_opens_notepad_and_ctrl_enter_sends(tmp_path):
     assert msgs[-1]["author"] == "dave"
 
 
-def test_notepad_esc_keeps_draft_back_in_chat_box(tmp_path):
+def test_notepad_esc_sends_and_ctrl_e_carries_back(tmp_path):
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    # draft "hi" -> editor appends "xy" at the caret -> ESC keeps it ->
-    # back in the chat box ENTER posts the carried draft.
-    keys = ["h", "i", "CTRL_E"] + list("xy") + ["ESC", "ENTER", "ESC"]
+    # ESC is the save key: draft "hi" + editor "xy" -> ESC posts "hixy";
+    # second ESC exits the chat.
+    keys = ["h", "i", "CTRL_E"] + list("xy") + ["ESC", "ESC"]
     _run_chat_with_editor(s, app, {"id": "b1", "title": "General"}, iter(keys))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
     assert msgs[-1]["body"] == "hixy"
+
+
+def test_notepad_ctrl_e_carries_draft_back_to_chat_box(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    # Ctrl-E carries the draft back into the chat box; ENTER then posts it.
+    keys = ["h", "i", "CTRL_E"] + list("xy") + ["CTRL_E", "ENTER", "ESC"]
+    _run_chat_with_editor(s, app, {"id": "b1", "title": "General"}, iter(keys))
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert msgs[-1]["body"] == "hixy"
+
+
+def test_chat_box_collapses_tall_draft_to_preview(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    # 240 chars -> 4 display rows -> collapses to preview + last 2 rows so
+    # a carried-back editor draft never walls over the bubble thread; the
+    # full draft still posts intact from the collapsed preview.
+    keys = ["CTRL_E"] + ["a"] * 240 + ["CTRL_E", "ENTER", "ESC"]
+    _run_chat_with_editor(s, app, {"id": "b1", "title": "General"}, iter(keys))
+    text = _plain(s)
+    assert "> [4 lines - Ctrl-E to view]" in text
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert msgs[-1]["body"] == "a" * 240
 
 
 def test_notepad_arrows_insert_midline(tmp_path):
@@ -427,8 +454,9 @@ def test_notepad_capacity_capped_to_box(tmp_path):
     p = app.get_plugin("mainmenu")
 
     async def _a():
-        # editor is entered directly: no leading CTRL_E (the chat eats it)
-        keys = iter(["x"] * 200 + ["ESC"])
+        # editor is entered directly: no leading CTRL_E (the chat eats it).
+        # Ctrl-E exits keeping the draft (ESC would now send).
+        keys = iter(["x"] * 200 + ["CTRL_E"])
         orig = runner.read_key
 
         async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
