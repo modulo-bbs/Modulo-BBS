@@ -462,3 +462,35 @@ def test_notepad_dead_session_exits_keeping_draft(tmp_path):
         assert draft == "kept"
 
     asyncio.run(_a())
+
+
+def test_notepad_enter_swallows_crlf_trailing_lf(tmp_path):
+    """CRLF clients: Enter's CR inserts one newline; the trailing LF left in
+    the stash must not surface as an immediate Ctrl-Enter send (Dave: 'enter
+    key is posting instead of CR/LF in the editor')."""
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    p = app.get_plugin("mainmenu")
+
+    async def _a():
+        keys = iter(["ENTER", "x", "LF"])
+        orig = runner.read_key
+
+        async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
+            k = next(keys)
+            if k == "ENTER":
+                sess._line_buffer = "\n"   # simulate a CRLF client
+            return k
+
+        runner.read_key = fake_rk  # type: ignore[assignment]
+        try:
+            posted, draft = await p._social_overlay_editor(
+                s, {"id": "b1", "title": "General"}, "")
+        finally:
+            runner.read_key = orig  # type: ignore[assignment]
+        assert posted is True
+        assert draft == "\nx"      # one newline, then x — no premature send
+
+    asyncio.run(_a())

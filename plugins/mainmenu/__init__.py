@@ -934,6 +934,11 @@ class MainmenuPlugin(Plugin):
             if key in ("ESC", "CTRL_E"):
                 return False, text          # back to chat, draft kept
             if key == "ENTER":
+                # Swallow a CRLF client's trailing LF (same as the chat's
+                # ENTER branch) or it surfaces as "LF" — an instant send.
+                stash = getattr(session, "_line_buffer", "")
+                if stash.startswith("\n"):
+                    session._line_buffer = stash[1:]
                 cand = text[:off] + "\n" + text[off:]
                 if fits(cand):
                     text, off = cand, off + 1
