@@ -160,12 +160,20 @@ plugins/
 │   ├── screens/      # display templates (CRLF, ASCII-safe)
 │   └── data/         # runtime data (totp_secrets.json)
 ├── messageboard/
-│   ├── __init__.py
-│   ├── boards.py     # BoardStore CRUD
+│   ├── __init__.py     # definition-holder only: boards.json + boot sync ([M] retired)
+│   ├── boards.py       # BoardStore (board definitions)
 │   ├── screens/
-│   └── data/         # boards.json, <board_id>/*.json messages
+│   └── data/           # boards.json (definitions; messages live in conversations/)
+├── conversations/      # unified message store (Social/DMs/boards since 2026-08-25)
+│   └── data/           # index.json, reads.json, <conversation_id>/ messages
 └── ...
 ```
+
+Social rooms are `kind=board` conversations. Sysops manage messages through the
+One-API ops (`conversations.*`, with `boards.*` shims) — see `docs/one-api.md`;
+in-app, Social rooms are the Telegram-style chat (see
+`plugins/mainmenu/docs/README.md` for the key map, including the Ctrl-E overlay
+editor).
 
 ## Monitoring
 

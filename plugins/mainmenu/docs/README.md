@@ -26,18 +26,19 @@ Toggle at runtime: `/screen` flips `screen_mode`; classic vs PIM is stored in
 `home_mode` (set via `users.update` or a future `/home` command — currently
 manual via prefs; the menu respects it immediately).
 
-## Tabs (build-plan Phase 1, Step 6)
+## Tabs (boards-unification B5/B7)
 
-Default tabs (boards | DMs | Mentions), declared in `plugins/mainmenu/tabs.py`
-as `DEFAULT_TABS`. Each tab:
+Default tabs (**Dashboard | Social | Files | Bulletins**), declared in
+`plugins/mainmenu/tabs.py` as `DEFAULT_TABS`. Each tab:
 
 ```python
-{"id": "boards", "label": "Boards", "kind": "board", "key": "1", "requires": []}
+{"id": "social", "label": "Social", "kind": "board", "key": "2", "requires": []}
 ```
 
-- `kind` filters `conversations.list` (`board|channel|dm|group|all`)
+- `kind` filters `conversations.list` (`board|channel|dm|group|all`) — Social is
+  the composite tab (board rooms + DMs pinned on top)
 - `requires` is a group gate via `user.can_access()` — hidden unless caller qualifies
-- `key` is the digit that activates the tab (1/2/3) — capped at 5 tabs for 80-col fit
+- `key` is the digit that activates the tab — capped at 5 tabs for 80-col fit
 
 Sysop override: `plugins/mainmenu/data/tabs.json` (JSON list of tab objects) replaces
 the default set entirely when present. Plugin-contributed tabs: set `pim_tab = {...}`
@@ -46,15 +47,46 @@ on any `Plugin` class; collected at `on_load` and appended (no duplicates).
 Visible-tab check: `visible_tabs(load_tabs(bbs), user)` respects the gate;
 anonymous sees only `requires=[]` tabs.
 
-Keys inside the PIM (numbers reserved for tabs — board selection uses up/dn+Enter):
-- `1`/`2`/`3` (and `LEFT`/`RIGHT` / `H`/`L`) → switch tab, reset highlight to 0
+Keys inside the PIM (numbers reserved for tabs — selection uses up/dn+Enter):
+- `1`/`2`/`3`/`4` (and `LEFT`/`RIGHT` / `H`/`L`) → switch tab, reset highlight to 0
 - `UP`/`K` , `DOWN`/`J` → move highlight inside pane
-- `ENTER` → open highlighted conversation in full-screen reader
+- `ENTER` → Social: enter the highlighted room's chat (B8); other tabs: open
+  the full-screen reader
 - `/` → slash commands (`/screen`, `/help`) — same as classic
 
-Reader inside pane (Step 9): paged, threaded (`parent_id` indented), `F`ind,
-`R`eply (quoted, `/A` aborts, empty-line finish), `D`elete (own or mod),
-`N`/`P` paging, `Q` back to tabs.
+## Social chat (B8, Dave's Telegram-style surface)
+
+ENTER on a Social room opens a full-screen chat: bubble history (own messages
+right-aligned cyan, others green, `*NEW*` badge on arrivals since you entered),
+tail-anchored entry, 1s polling so other nodes appear live. Keys:
+
+| Key | Action |
+|---|---|
+| printable / `SPACE` | type into the draft (echo painted by the box) |
+| `ENTER` | post the draft |
+| `Ctrl-Enter` (LF) | insert a newline — the input box word-wraps and grows upward over bubbles (capped; tall drafts collapse to `[N lines - Ctrl-E to view]` + last 2 rows) |
+| `Ctrl-E` | overlay notepad editor (see below) |
+| `UP`/`DOWN` | scroll history (tail-anchored) |
+| `PgUp`/`PgDn`/`SPACE`* | page history (*Space aliases PgDn only when the draft is empty) |
+| `ESC` | back to the Social pane (marks the room read) |
+
+SyncTERM key facts (hex-captured 2026-08-25): plain Enter sends CR (CRLF on the
+wire — the trailing LF is swallowed), Shift-Enter is byte-identical to Enter,
+**Ctrl-Enter sends LF**, Ctrl-E sends 0x05.
+
+### Overlay notepad editor (`Ctrl-E`)
+
+A bright-green bordered box overlays the live chat; the draft renders inside it
+from the top with soft wrap. Notepad-style caret editing: arrows move the caret
+anywhere in the box, `Enter` opens a line, `Backspace` joins, typing inserts at
+the caret. Capacity is hard-capped to the box (an edit that would not fit is
+refused — it never scrolls). `ESC` or `Ctrl-Enter` **sends** (ESC = save, per
+Dave); `Ctrl-E` carries the draft back to the chat input box.
+
+Reader (non-Social tabs): paged, threaded (`parent_id` indented), `F`ind,
+`R`eply (classic `/S` save `/A` abort line editor), `D`elete (own or mod),
+`N`/`P` paging, `Q` back to tabs. `R`/`D` are retired on Social — messaging
+lives in the chat.
 
 ## Keys
 
