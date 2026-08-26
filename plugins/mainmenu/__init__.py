@@ -790,8 +790,16 @@ class MainmenuPlugin(Plugin):
                     R = "" if is_plain else ANSI.RESET
                     await self.bbs.send(session, f"\r\x1b[2K{G}>{R} {draft}")
                 # anything else: ignore
+            # exit — remember where "new" ends for the two-pane preview
             try:
                 await self.bbs.conversations.mark_read(uname, cid)
+                seen = getattr(session, "_social_seen", None)
+                if not isinstance(seen, dict):
+                    seen = {}
+                    session._social_seen = seen  # type: ignore[attr-defined]
+                seen[cid] = max(
+                    (int(m.get("id", 0)) for m in (msgs or [])), default=0
+                )
             except Exception:
                 pass
         finally:

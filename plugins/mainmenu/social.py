@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-from shared.textwrap import wrap
 from core.conversations import SOCIAL_THREAD_TITLE_MAX as TITLE_MAX
 
 DMS_ROOM_ID = "dms"  # sentinel id of the pinned DMs aggregate row
@@ -194,16 +193,39 @@ async def render_social(conversations, session) -> str:
         pass
 
     # -- build message lines for the pane ------------------------------------
-    mlines: list[str] = []
-    for m in msgs:
-        created = (m.get("created", "") or "")[5:16].replace("T", " ")
-        mlines.append(f"#{m.get('id', '?')} [{m.get('author', '?')}] {created}")
-        mlines.extend(wrap(m.get("body", "") or "", PANE_INNER))
-        mlines.append("")
-    while mlines and not mlines[-1]:
-        mlines.pop()
-    offset = max(0, len(mlines) - pane_rows_n - up)
-    window = mlines[offset : offset + pane_rows_n]
+    # B8: compact bubbles (summarized) instead of the old #id [author] list.
+    # Tail-anchored; _social_scroll_up now counts MESSAGES scrolled past.
+    seen = getattr(session, "_social_seen", None)
+    if not isinstance(seen, dict):
+        seen = {}
+        try:
+            session._social_seen = seen
+        except Exception:
+            pass
+    new_from = int(seen.get(cur_id, 0) or 0)
+
+    from plugins.mainmenu.bubbles import render_bubbles as _render_bubbles
+
+    up = max(0, int(up or 0))
+    pane_rows_all: list[str] = []
+    if thread_conv is not None and msgs:
+        end = len(msgs) - up
+        window = msgs[max(0, end - 40):max(0, end)] or msgs[:1]
+        groups: list[list[str]] = []
+        used = 0
+        for m in reversed(window):
+            grows = _render_bubbles(
+                [m], PANE_INNER, username=username,
+                new_from_id=new_from, plain=is_plain, compact=True)
+            if used + len(grows) > pane_rows_n:
+                break
+            groups.append(grows)
+            used += len(grows)
+        for grows in reversed(groups):
+            pane_rows_all.extend(grows)
+
+    # bubbles were already tail-fitted (respecting scroll-up) to the budget
+    window = pane_rows_all[:pane_rows_n]
 
     # -- sidebar cell rows ----------------------------------------------------
     side: list[str] = []
@@ -237,7 +259,17 @@ async def render_social(conversations, session) -> str:
 
     # -- zip cells into box rows ----------------------------------------------
     def cell(text: str, width: int, selected: bool) -> str:
-        padded = f" {text[:width]:<{width}} "
+        # Pad by VISIBLE width -- bubble rows carry ANSI color codes.
+        # The cell's total is width+2 (the flanking spaces are part of it).
+        import re as _re
+
+        body = f" {text} "
+        vlen = len(_re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", body))
+        if vlen > width + 2:
+            plain_text = _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+            body = f" {plain_text[:width]} "
+            vlen = width + 2
+        padded = body + " " * max(0, width + 2 - vlen)
         if selected and not is_plain:
             return f"{ANSI.REVERSE}{padded}{ANSI.RESET}"
         return padded

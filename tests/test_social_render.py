@@ -97,9 +97,9 @@ def test_plain_layout_widths_and_rows():
         assert "DMs" in joined and "+ new thread" in joined
         # board row selected marker + unread star, title capped at 15
         assert "> General Discuss" in joined and "*" in joined
-        # thread pane header + message meta line
-        assert "(2 msgs)" in joined
-        assert "#1 [dave]" in joined and "08-22 20:27" in joined
+        # thread pane: compact bubbles, author-only title bars (B8)
+        assert "General Discuss" in joined
+        assert "dave" in joined and "api_test" in joined
         # long body got wrapped inside the pane, not truncated mid-word garbage
         assert "deliberately" in joined
 
