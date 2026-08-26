@@ -288,6 +288,60 @@ def test_crlf_trailing_lf_does_not_leak_into_next_draft(tmp_path):
     assert msgs[-1]["body"] == "o"          # not "\no"
 
 
+def test_no_emitted_segment_exceeds_79_visible_columns(tmp_path):
+    """Dave's SyncTERM repro (B8 part 4 regression): the pre-part-4 redraw
+    echoed the whole draft on ONE line, so past end-of-line the terminal
+    autowrapped it — every keystroke scrolled the screen and duplicated the
+    row. Walk the raw output through a minimal 80x24 terminal model and
+    assert nothing we send ever forces a wrap/scroll.
+    """
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    body = ("OK, So here is another attempt at writing a long message "
+            "first wraparound will be tested, and you see what happened.")
+    _run_chat(s, app, {"id": "b1", "title": "General"},
+              iter(list(body) + ["ESC"]))
+
+    import re as _re
+
+    raw = bytes(s.writer.buf).decode("cp437", errors="replace")
+    W, H = 80, 24
+    row = col = 1
+    csi = None
+    for tok in _re.split(r"(\x1b\[[0-9;]*[A-Za-z])", raw):
+        if not tok:
+            continue
+        if tok.startswith("\x1b["):
+            if tok[-1] == "H":
+                p = tok[2:-1].split(";")
+                row = int(p[0] or 1)
+                col = int(p[1] or 1) if len(p) > 1 else 1
+            elif tok[-1] == "J":
+                pass  # erase display/from-cursor: no cursor movement
+            elif tok[-1] == "K":
+                pass  # erase line
+            # SGR (m) and anything else: no movement
+            continue
+        for ch in tok:
+            if ch == "\r":
+                col = 1
+            elif ch == "\n":
+                row += 1
+            elif ch == "\x1b":
+                continue
+            else:
+                if col > W:
+                    row += 1  # pending autowrap fires on next printable
+                    col = 1
+                col += 1
+            if row > H:
+                pytest.fail(
+                    f"output scrolls a 24-row terminal at row={row} "
+                    f"col={col} near {raw[max(0, raw.find(tok)-40):raw.find(tok)+20]!r}")
+
+
 def test_input_rows_clipped_to_cap_keeping_latest_lines(tmp_path):
     app = _app(tmp_path)
     _seed(app)
