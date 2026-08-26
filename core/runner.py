@@ -66,7 +66,7 @@ def _idle(bbs, session) -> None:
     asyncio.ensure_future(bbs.send(session, "\r\n\r\n[Idle timeout. Goodbye!]\r\n"))
 
 
-async def _read_chunk(bbs, session, timeout):
+async def _read_chunk(bbs, session, timeout, *, idle_on_timeout=True):
     """Read one chunk of bytes, handling telnet negotiation.
 
     Returns the decoded clean text (IAC sequences stripped), or ``None`` on
@@ -88,7 +88,8 @@ async def _read_chunk(bbs, session, timeout):
         try:
             data = await asyncio.wait_for(reader.read(1024), timeout=timeout)
         except asyncio.TimeoutError:
-            _idle(bbs, session)
+            if idle_on_timeout:
+                _idle(bbs, session)
             return None
         if not data:
             return None
@@ -164,7 +165,14 @@ async def read_command(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
         buf += chunk
 
 
-async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
+async def read_key(
+    bbs,
+    session,
+    timeout: int = IDLE_TIMEOUT,
+    *,
+    preserve_case: bool = False,
+    idle_on_timeout: bool = True,
+) -> str | None:
     """Read a SINGLE keypress (no Enter) for hotkey menus.
 
     Returns the first printable, non-whitespace character (uppercased), or
@@ -172,6 +180,9 @@ async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
     ``LEFT``/``RIGHT``; Enter (CR/LF) is ``ENTER``. A bare ESC with no
     follow-up byte within :data:`ESC_KEY_WINDOW` returns ``"ESC"`` (B0:
     Social's back key); a fast-following byte still parses as its sequence.
+    BACKSPACE (DEL/BS) is ``"BACKSPACE"``. Chat mode reads with
+    ``preserve_case=True`` and ``idle_on_timeout=False`` (short polling
+    without tripping the idle-notice).
     Bytes typed after the key are stashed in ``_line_buffer`` for the next
     read. Does not echo (see module docstring).
     """
@@ -203,8 +214,10 @@ async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
             return "SPACE"  # B4: PgDn alias on Social
         ch, buf = buf[0], buf[1:]
         session._line_buffer = buf
+        if ch in ("\x7f", "\x08"):
+            return "BACKSPACE"
         if ch.isprintable() and not ch.isspace():
-            return ch.upper()
+            return ch if preserve_case else ch.upper()
 
     while True:
         if pending_esc:
@@ -214,7 +227,9 @@ async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
             # idle timeout, so the idle machinery is never triggered.
             try:
                 chunk = await asyncio.wait_for(
-                    _read_chunk(bbs, session, timeout), timeout=ESC_KEY_WINDOW
+                    _read_chunk(bbs, session, timeout,
+                                idle_on_timeout=idle_on_timeout),
+                    timeout=ESC_KEY_WINDOW,
                 )
             except asyncio.TimeoutError:
                 chunk = None
@@ -222,7 +237,8 @@ async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
                 session._line_buffer = buf[1:]
                 return "ESC"
         else:
-            chunk = await _read_chunk(bbs, session, timeout)
+            chunk = await _read_chunk(bbs, session, timeout,
+                                      idle_on_timeout=idle_on_timeout)
             if chunk is None:
                 return None
         # Prepend to stash and re-decode via the same logic above so
@@ -254,9 +270,12 @@ async def read_key(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
                 # (B0: silence resolves to a lone "ESC" keypress)
                 pending_esc = True
                 break
+            if ch in ("\x7f", "\x08"):
+                session._line_buffer = buf[i + 1 :]
+                return "BACKSPACE"
             if ch.isprintable() and not ch.isspace():
                 session._line_buffer = buf[i + 1 :]
-                return ch.upper()
+                return ch if preserve_case else ch.upper()
         # Pure control / whitespace: loop for a real key.
 
 

@@ -126,3 +126,50 @@ def test_esc_then_letter_keeps_stash_intact():
         await task
 
     asyncio.run(_a())
+
+
+# -- chat-mode primitives (B8: telegram-style social chat) -------------------
+
+
+def test_backspace_key_surfaces():
+    async def _a():
+        r = _reader()
+        r.feed_data("ab\x7f\x08".encode("cp437"))
+        r.feed_eof()
+        s = _session(r)
+        bb = RecordingBBS()
+        assert await runner.read_key(bb, s) == "A"
+        assert await runner.read_key(bb, s) == "B"
+        assert await runner.read_key(bb, s) == "BACKSPACE"
+        assert await runner.read_key(bb, s) == "BACKSPACE"
+
+    asyncio.run(_a())
+
+
+def test_preserve_case_keeps_draft_text_honest():
+    async def _a():
+        r = _reader()
+        r.feed_data("hI".encode("cp437"))
+        r.feed_eof()
+        s = _session(r)
+        bb = RecordingBBS()
+        assert await runner.read_key(bb, s, preserve_case=True) == "h"
+        assert await runner.read_key(bb, s, preserve_case=True) == "I"
+
+    asyncio.run(_a())
+
+
+def test_poll_timeout_returns_none_without_idle_notice():
+    async def _a():
+        r = _reader()  # never fed: read will block until timeout
+        s = _session(r)
+        bb = RecordingBBS()
+        key = await asyncio.wait_for(
+            runner.read_key(bb, s, timeout=0.05, idle_on_timeout=False),
+            timeout=2.0,
+        )
+        assert key is None
+        # the idle-timeout machinery must NOT have fired
+        assert not any("Idle timeout" in t for t in bb.sent)
+
+    asyncio.run(_a())
