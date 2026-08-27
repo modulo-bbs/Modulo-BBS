@@ -91,14 +91,43 @@ def test_arrow_selection_wraps_over_rooms(tmp_path):
         # rooms: dms, b1, b2 (activity order: b1 has a post)
         assert await p._handle_pim_key(s, "DOWN") is True
         assert s._pim_selected == 1
+        assert getattr(s, "_social_selected_id", "") == "b1"
         assert await p._handle_pim_key(s, "DOWN") is True
         assert s._pim_selected == 2
+        assert s._social_selected_id == "b2"
         # wrap past last room -> pinned DMs again
         assert await p._handle_pim_key(s, "DOWN") is True
         assert s._pim_selected == 0
+        assert s._social_selected_id == "dms"
         # up wraps backwards
         assert await p._handle_pim_key(s, "UP") is True
         assert s._pim_selected == 2
+        assert s._social_selected_id == "b2"
+
+    asyncio.run(_a())
+
+
+def test_arrows_follow_room_after_activity_reorders(tmp_path):
+    """DOWN after a quieter room is bumped down still moves from that room."""
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _social_session(dave)
+    p = app.get_plugin("mainmenu")
+
+    async def _a():
+        await app.conversations.post_message("b2", author="dave", body="on b2")
+        # activity order: DMs, b2, b1
+        assert await p._handle_pim_key(s, "DOWN") is True
+        assert s._social_selected_id == "b2"
+        await app.conversations.post_message("b1", author="ana", body="jumps up")
+        from plugins.social.social import render_social
+
+        await render_social(app.conversations, s)
+        assert s._social_selected_id == "b2"
+        assert s._pim_selected == 2
+        assert await p._handle_pim_key(s, "UP") is True
+        assert s._social_selected_id == "b1"
 
     asyncio.run(_a())
 

@@ -419,23 +419,25 @@ class MainmenuPlugin(Plugin):
             active_id = tabs[0]["id"]
         active_idx = next((i for i, t in enumerate(tabs) if t["id"] == active_id), 0)
 
+        from plugins.social.social import forget_social_selection
+
         if key in ("1", "2", "3", "4", "5"):
             idx = int(key) - 1
             if 0 <= idx < len(tabs):
                 session._pim_active_tab = tabs[idx]["id"]
-                session._pim_selected = 0
+                forget_social_selection(session)
                 return True
             return False
 
         if key in ("LEFT", "H"):
             active_idx = (active_idx - 1) % len(tabs)
             session._pim_active_tab = tabs[active_idx]["id"]
-            session._pim_selected = 0
+            forget_social_selection(session)
             return True
         if key in ("RIGHT", "L"):
             active_idx = (active_idx + 1) % len(tabs)
             session._pim_active_tab = tabs[active_idx]["id"]
-            session._pim_selected = 0
+            forget_social_selection(session)
             return True
 
         plugin = tabs[active_idx].get("plugin") or self.bbs.get_plugin(tabs[active_idx]["id"])

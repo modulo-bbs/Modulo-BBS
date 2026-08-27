@@ -55,6 +55,46 @@ def _activity_key(conv: dict) -> str:
     return conv.get("last_message_at") or conv.get("created") or ""
 
 
+def _apply_social_selection(session, rooms: list[Room], sel: int) -> int:
+    n = len(rooms)
+    if n:
+        sel = max(0, min(sel, n - 1))
+    else:
+        sel = 0
+    try:
+        session._pim_selected = sel
+        session._social_selected_id = rooms[sel].id if n else ""
+    except Exception:
+        pass
+    return sel
+
+
+def remember_social_selection(session, rooms: list[Room]) -> int:
+    """Highlighted sidebar index, pinned to room id when activity reorders."""
+    sel = int(getattr(session, "_pim_selected", 0) or 0)
+    keep = getattr(session, "_social_selected_id", None) or ""
+    if keep:
+        for i, r in enumerate(rooms):
+            if r.id == keep:
+                sel = i
+                break
+    return _apply_social_selection(session, rooms, sel)
+
+
+def set_social_selection(session, rooms: list[Room], sel: int) -> int:
+    """User moved the highlight; pin to that room from now on."""
+    return _apply_social_selection(session, rooms, sel)
+
+
+def forget_social_selection(session) -> None:
+    """Leave Social (tab switch / dashboard). Next visit starts at DMs."""
+    try:
+        session._pim_selected = 0
+        session._social_selected_id = ""
+    except Exception:
+        pass
+
+
 def _cap(title: str) -> str:
     return (title or "")[:TITLE_MAX]
 
@@ -139,10 +179,12 @@ async def render_social(
 ) -> str:
     """The Social tab's pane band: room sidebar | live thread pane.
 
-    Selection is ``session._pim_selected`` (index into ``social_rooms()``);
-    changing rooms re-renders immediately and re-anchors the message
-    scroll to the newest activity. Scroll position is stored as lines
-    scrolled *up from the bottom* (0 = tail) in ``session._social_scroll_up``.
+    Selection is ``session._pim_selected`` (index into ``social_rooms()``),
+    pinned to ``session._social_selected_id`` so a new post that reorders
+    the activity list does not jump the highlight. Changing rooms
+    re-renders immediately and re-anchors the message scroll to the
+    newest activity. Scroll position is stored as lines scrolled *up
+    from the bottom* (0 = tail) in ``session._social_scroll_up``.
 
     *compact* is the browse preview (author-only bubbles). Thread focus
     passes ``compact=False`` so the same two-pane chrome shows full
@@ -158,15 +200,7 @@ async def render_social(
     username = getattr(user, "username", "") or ""
 
     rooms = await social_rooms(conversations, user)
-    sel = int(getattr(session, "_pim_selected", 0) or 0)
-    if rooms and sel >= len(rooms):
-        sel = len(rooms) - 1
-        try:
-            session._pim_selected = sel
-        except Exception:
-            pass
-    if sel < 0:
-        sel = 0
+    sel = remember_social_selection(session, rooms)
 
     # Row budget: tab bar + funnel + bottom + hint + prompt = 5 chrome rows.
     # `_show_menu` sends tab_bar + pane + trailing CRLF, then CUPs the prompt

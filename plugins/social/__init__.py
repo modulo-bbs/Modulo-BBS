@@ -106,22 +106,26 @@ class SocialPlugin(Plugin):
         per the plan's hard rule the two modes never blur, so no navigation
         keystroke can leak into a draft.
         """
-        from plugins.social.social import social_rooms
+        from plugins.social.social import (
+            forget_social_selection,
+            remember_social_selection,
+            set_social_selection,
+            social_rooms,
+        )
 
         user = getattr(session, "user", None)
         rooms = await social_rooms(self.bbs.conversations, user)
         n = len(rooms)
-        sel = int(getattr(session, "_pim_selected", 0) or 0)
-        sel = max(0, min(sel, n - 1)) if n else 0
+        sel = remember_social_selection(session, rooms)
 
         def _page() -> int:
             return max(6, int(getattr(session, "terminal_height", 24) or 24) - 6)
 
         if key in ("UP", "K") and n:
-            session._pim_selected = (sel - 1) % n  # type: ignore[attr-defined]
+            set_social_selection(session, rooms, (sel - 1) % n)
             return True
         if key in ("DOWN", "J") and n:
-            session._pim_selected = (sel + 1) % n  # type: ignore[attr-defined]
+            set_social_selection(session, rooms, (sel + 1) % n)
             return True
         if key in ("PGDN", "SPACE"):
             up = int(getattr(session, "_social_scroll_up", 0) or 0)
@@ -135,7 +139,7 @@ class SocialPlugin(Plugin):
             # Back/up one level: Social → Dashboard. B is scoped to this
             # handler only — outside Social nothing changes.
             session._pim_active_tab = "dashboard"  # type: ignore[attr-defined]
-            session._pim_selected = 0  # type: ignore[attr-defined]
+            forget_social_selection(session)
             session._social_scroll_up = 0  # type: ignore[attr-defined]
             return True
         if key == "ENTER":
@@ -170,7 +174,7 @@ class SocialPlugin(Plugin):
 
     async def _select_thread_room(self, session, conv: dict) -> None:
         """Keep the sidebar highlight on the thread we are composing in."""
-        from plugins.social.social import social_rooms
+        from plugins.social.social import set_social_selection, social_rooms
 
         rooms = await social_rooms(
             self.bbs.conversations, getattr(session, "user", None))
@@ -184,10 +188,10 @@ class SocialPlugin(Plugin):
                 kind = None
         for i, r in enumerate(rooms):
             if r.kind == "dms" and kind == "dm":
-                session._pim_selected = i  # type: ignore[attr-defined]
+                set_social_selection(session, rooms, i)
                 return
             if r.id == cid:
-                session._pim_selected = i  # type: ignore[attr-defined]
+                set_social_selection(session, rooms, i)
                 return
 
     async def _social_new_thread(self, session):
@@ -218,12 +222,12 @@ class SocialPlugin(Plugin):
                 continue
             conv = await self.bbs.conversations.create_conversation(
                 kind="board", title=title, created_by=session.user.username)
-            from plugins.social.social import social_rooms
+            from plugins.social.social import set_social_selection, social_rooms
 
             rooms = await social_rooms(self.bbs.conversations, session.user)
             for i, r in enumerate(rooms):
                 if r.id == conv["id"]:
-                    session._pim_selected = i  # type: ignore[attr-defined]
+                    set_social_selection(session, rooms, i)
                     break
             session._social_scroll_up = 0  # type: ignore[attr-defined]
             await self.bbs.send(session, f"Thread '{title}' created.\r\n")

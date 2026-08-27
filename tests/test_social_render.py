@@ -142,6 +142,42 @@ def test_preview_new_badge_only_on_mail_since_last_leave():
     asyncio.run(_a())
 
 
+def test_selection_follows_room_when_activity_reorders():
+    """Hover stays on the room, not the slot, when another board jumps to top."""
+
+    async def _a():
+        c = StubConvs()
+        c.index.append({
+            "id": "newtest-1", "kind": "board", "title": "newtest 1",
+            "created": "2026-08-20T11:00:00+00:00", "requires": [],
+            "participants": [], "message_count": 1,
+            "last_message_at": "2026-08-24T12:00:00+00:00",
+        })
+        c.msgs["newtest-1"] = [
+            {"id": 1, "author": "dave", "body": "quiet thread",
+             "created": "2026-08-24T12:00:00+00:00"},
+        ]
+        # DMs, newtest 1 (newer), General Discussion (older)
+        s = _session(User(username="dave"), sel=1)
+        first = await render_social(c, s)
+        assert "quiet thread" in first
+        assert getattr(s, "_social_selected_id", "") == "newtest-1"
+        # General gets newer mail and sorts above newtest; index 1 would be General
+        c.index[0]["last_message_at"] = "2026-08-25T09:00:00+00:00"
+        c.msgs["general-discussion"].append({
+            "id": 3, "author": "api_test", "body": "hello from General",
+            "created": "2026-08-25T09:00:00+00:00",
+        })
+        c.index[0]["message_count"] = 4
+        again = await render_social(c, s)
+        assert "quiet thread" in again
+        assert "hello from General" not in again
+        assert s._pim_selected == 2
+        assert s._social_selected_id == "newtest-1"
+
+    asyncio.run(_a())
+
+
 def test_selection_moves_highlight_and_pane():
     async def _a():
         c = StubConvs()

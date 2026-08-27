@@ -80,7 +80,9 @@ class DashboardPlugin(Plugin):
             tabs = []
         if any(t["id"] == jump for t in tabs):
             session._pim_active_tab = jump
-            session._pim_selected = 0
+            from plugins.social.social import forget_social_selection
+
+            forget_social_selection(session)
             return True
         plugin = self.bbs.get_plugin(jump)
         if plugin is not None:
