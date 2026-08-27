@@ -733,3 +733,21 @@ def test_mail_while_away_stars_and_badges_then_clears(tmp_path):
     out2 = _preview(app, dave)
     assert "*NEW*" not in out2
     assert asyncio.run(app.conversations.unread_count("dave", "b1")) == 0
+
+
+def test_own_post_does_not_show_new_status(tmp_path):
+    """Footer 1 NEW / *NEW* are other people's mail, never your own."""
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    _run_chat(s, app, {"id": "b1", "title": "General"}, iter(["ESC"]))
+    asyncio.run(app.conversations.post_message("b1", author="dave", body="test"))
+    s2 = _session(dave)
+    _run_chat(s2, app, {"id": "b1", "title": "General"}, iter(["ESC"]))
+    chat = _plain(s2)
+    assert "test" in chat
+    assert "*NEW*" not in chat
+    assert "1 NEW" not in chat
+    out = _preview(app, dave)
+    assert "*NEW*" not in out

@@ -359,7 +359,11 @@ class SocialPlugin(Plugin):
                         vis_rows.extend(grows)
 
                     new_count = (
-                        sum(1 for m in msgs if int(m.get("id", 0)) >= new_from)
+                        sum(
+                            1 for m in msgs
+                            if int(m.get("id", 0)) >= new_from
+                            and str(m.get("author", "")) != uname
+                        )
                         if new_from else 0
                     )
                     title = str(conv.get("title", cid))
