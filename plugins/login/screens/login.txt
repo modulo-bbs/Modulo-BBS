@@ -4,7 +4,7 @@
 
 {BRIGHT_WHITE}This system is for registered users only.{RESET}
 {BRIGHT_YELLOW}New here? Type {BOLD}R{RESET}{BRIGHT_YELLOW} to register.{RESET}
-{BRIGHT_WHITE}Return?   Type {BOLD}Q{RESET}{BRIGHT_WHITE} to go back.{RESET}
+{BRIGHT_WHITE}Done?     Type {BOLD}Q{RESET}{BRIGHT_WHITE} to disconnect.{RESET}
 
 {BRIGHT_BLACK}------------------------------------------------------------{RESET}
 {BRIGHT_GREEN}Please enter your username and password below.{RESET}

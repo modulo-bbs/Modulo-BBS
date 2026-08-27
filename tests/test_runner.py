@@ -25,7 +25,7 @@ class RecordingBBS:
         self.sent.append(text)
 
     async def send_raw(self, session, data):
-        pass
+        self.sent.append(data.decode("latin-1", errors="replace"))
 
 
 def _session(reader: asyncio.StreamReader) -> Session:
@@ -214,5 +214,76 @@ def test_ctrl_s_surfaces_for_overlay_save():
         assert await runner.read_key(bb, s) == "A"
         assert await runner.read_key(bb, s) == "CTRL_S"
         assert await runner.read_key(bb, s) == "B"
+
+    asyncio.run(_a())
+
+
+def test_read_command_backspace_edits_the_line():
+    """Mistype, backspace, retype — the returned line is the corrected one."""
+    async def _a():
+        r = _reader()
+        r.feed_data("sekrxt\x08\x08it\r".encode("cp437"))
+        r.feed_eof()
+        s = _session(r)
+        assert await runner.read_command(RecordingBBS(), s) == "sekrit"
+
+    asyncio.run(_a())
+
+
+def test_read_command_del_edits_the_line():
+    async def _a():
+        r = _reader()
+        r.feed_data("abx\x7fc\r".encode("cp437"))
+        r.feed_eof()
+        s = _session(r)
+        assert await runner.read_command(RecordingBBS(), s) == "abc"
+
+    asyncio.run(_a())
+
+
+def test_read_command_echo_mask_stars_not_plaintext():
+    async def _a():
+        r = _reader()
+        r.feed_data("ab\x08c\r".encode("cp437"))
+        r.feed_eof()
+        s = _session(r)
+        bb = RecordingBBS()
+        line = await runner.read_command(bb, s, echo="*")
+        assert line == "ac"
+        joined = "".join(bb.sent)
+        assert "*" in joined
+        assert "a" not in joined
+        assert "b" not in joined
+        assert "c" not in joined
+
+    asyncio.run(_a())
+
+
+def test_read_command_enter_echo_is_not_a_padded_blank_row():
+    """A bare Enter used to go through _pad_line as 79 spaces, so Password:
+    sat under a gutter of blanks (worse on SyncTERM CRLF)."""
+    async def _a():
+        r = _reader()
+        r.feed_data("dave\r\n".encode("cp437"))
+        r.feed_eof()
+        s = _session(r)
+        bb = RecordingBBS()
+        assert await runner.read_command(bb, s) == "dave"
+        joined = "".join(bb.sent)
+        assert " " * 20 not in joined
+        assert joined.count("\n") == 1
+
+    asyncio.run(_a())
+
+
+def test_read_command_crlf_does_not_steal_the_next_line():
+    async def _a():
+        r = _reader()
+        r.feed_data("dave\r\nsekrit\r".encode("cp437"))
+        r.feed_eof()
+        s = _session(r)
+        bb = RecordingBBS()
+        assert await runner.read_command(bb, s) == "dave"
+        assert await runner.read_command(bb, s) == "sekrit"
 
     asyncio.run(_a())

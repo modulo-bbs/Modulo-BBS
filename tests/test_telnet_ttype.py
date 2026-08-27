@@ -66,3 +66,14 @@ def test_naws_still_parsed_after_ttype():
     clean, _ = neg.process_data(naws)
     assert clean == b""
     assert neg.window_size == (80, 24)
+
+
+def test_do_echo_not_wont_while_server_already_echoing():
+    """Password-mask window WILL's ECHO; a client DO ECHO must not undo it."""
+    from shared.telnet_protocol import IAC, DO, WONT, OPT_ECHO
+
+    neg = TelnetNegotiator()
+    neg.local_options[OPT_ECHO] = True
+    _clean, responses = neg.process_data(bytes([IAC, DO, OPT_ECHO]))
+    blob = b"".join(responses or [])
+    assert bytes([IAC, WONT, OPT_ECHO]) not in blob

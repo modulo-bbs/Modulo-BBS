@@ -23,7 +23,14 @@ All standard tokens work. `totp_setup` receives `{SECRET}` and
 | Context | Key | Action |
 |---|---|---|
 | login screen | `R` | register instead of logging in |
-| any auth screen | `Q` | back out / disconnect |
+| login screen | `Q` | disconnect (splash is display-only; there is no previous menu) |
+| register | `Q` | back to the login screen |
+
+Password and confirm-password prompts echo `*` per keystroke (not the
+real characters). Backspace/DEL edit the hidden buffer — a mistype you
+correct before Enter is the corrected password, not the leftover bytes.
+Telnet briefly `WILL ECHO` for those fields so SyncTERM stops local-echoing
+the secret.
 
 ## Data
 

@@ -201,9 +201,18 @@ class TelnetNegotiator:
             return None
         
         elif cmd == DO:
-            # Remote wants us to enable an option
-            if option in self._supported_do():
+            # Remote wants us to enable an option. Honor ECHO if we already
+            # WILL'd it (password-mask window); otherwise keep the global
+            # "don't take over echo" policy.
+            allowed = (
+                option in self._supported_do()
+                or self.local_options.get(option) is True
+            )
+            if allowed:
+                already = self.local_options.get(option) is True
                 self.local_options[option] = True
+                if already:
+                    return None
                 return bytes([IAC, WILL, option])
             else:
                 return bytes([IAC, WONT, option])

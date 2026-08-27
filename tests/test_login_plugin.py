@@ -75,6 +75,7 @@ class FakeBBS:
         self.events = EventBus()
         self.users = UserManager(users_dir)
         self.sent = []
+        self.sent_raw = []
 
     async def send(self, session, text):
         self.sent.append(text)
@@ -82,6 +83,9 @@ class FakeBBS:
         if writer is not None:
             writer.write(text.encode("latin-1", errors="replace"))
             await writer.drain()
+
+    async def send_raw(self, session, data):
+        self.sent_raw.append(data)
 
 
 def make_session(inputs=None):
@@ -211,6 +215,18 @@ def test_login_flow_success(tmp_path):
     assert "Username" not in prompts          # login prompts are bare
     got = [x for x in bbs.sent if "Password:" in x]
     assert got
+
+
+def test_login_flow_password_backspace_still_authenticates(tmp_path):
+    """SyncTERM: mistype, backspace, type the rest — must not keep the
+    erased characters in the password buffer."""
+    bbs, totp, screens = _make_env(tmp_path)
+    _precreate(bbs)
+    s = make_session(inputs=["alice", "sekrxt\x08\x08it"])
+    result = run(LoginFlow(bbs, totp, screens).run(s))
+    assert result is True
+    assert s.authenticated is True
+    assert s.user is not None and s.user.username == "alice"
 
 
 def test_login_flow_wrong_password_then_quit(tmp_path):
@@ -456,6 +472,8 @@ def test_screen_loader_substitutes_ansi_and_placeholders(tmp_path):
     bbs, totp, screens = _make_env(tmp_path)
     text = screens.render("login.txt")
     assert "\x1b[" in text                 # ANSI escape injected
+    assert "disconnect" in text.lower()
+    assert "go back" not in text.lower()
     from shared.telnet_protocol import ANSI as A
     assert A.CLEAR_SCREEN in text
 

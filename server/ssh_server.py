@@ -118,21 +118,31 @@ class BBSSSHSession(asyncssh.SSHServerSession):
 
         # Server-side echo: SSH clients (SyncTERM included) expect the remote
         # end to echo typed characters, like a real tty line discipline.
-        # Printable characters echo as-is; DEL/Backspace erase in place;
+        # Printable characters echo as-is (or session.echo_mask for passwords);
+        # DEL/Backspace erase in place only when a column was echoed;
         # Enter echoes as CRLF. Control sequences (ESC ...) pass unechoed.
         echo = bytearray()
+        echoed = int(getattr(self._session, "_echoed_cols", 0) or 0) if self._session else 0
+        mask = getattr(self._session, "echo_mask", None) if self._session else None
+        mask_b = mask.encode("ascii", errors="replace")[:1] if mask else None
         i = 0
         while i < len(data):
             b = data[i:i + 1]
             if b == b"\x7f" or b == b"\x08":          # DEL / Backspace
-                echo += b"\b \b"
+                if echoed > 0:
+                    echo += b"\b \b"
+                    echoed -= 1
             elif b == b"\r":                          # Enter -> CRLF
                 echo += b"\r\n"
+                echoed = 0
             elif b == b"\x1b":                        # ESC: skip sequence
                 i += 2                                # skip ESC + first byte
             elif b >= b" ":
-                echo += b
+                echo += mask_b if mask_b else b
+                echoed += 1
             i += 1
+        if self._session is not None:
+            self._session._echoed_cols = echoed
         if echo:
             # data_received is a sync callback invoked by asyncssh; schedule
             # the async send on the loop rather than awaiting it here.

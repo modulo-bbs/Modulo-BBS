@@ -38,14 +38,14 @@ class RegistrationFlow:
                 return False                       # back out to login/menu
             username = raw.lower()
 
-            password = await tty.read_line("Password: ")
+            password = await tty.read_line("Password: ", secret=True)
             if not password:
                 await tty.send(
                     f"{ANSI.BRIGHT_RED}Password cannot be empty.{ANSI.RESET}\r\n"
                 )
                 await tty.pause()
                 continue
-            confirm = await tty.read_line("Confirm password: ")
+            confirm = await tty.read_line("Confirm password: ", secret=True)
             if password != confirm:
                 await tty.send(
                     f"{ANSI.BRIGHT_RED}Passwords do not match. Try again."

@@ -112,18 +112,23 @@ class Terminal:
         )
         await writer.drain()
 
-    async def read_line(self, prompt: str = "") -> str:
+    async def read_line(self, prompt: str = "", *, secret: bool = False) -> str:
         """Send an optional prompt, then read one line (CRLF-terminated).
 
         Uses the core negotiator-aware reader so telnet control bytes are
         handled and server-side echo fires; SSH sessions (which echo at
         the transport layer) pass through with echo suppressed there.
+        ``secret=True`` echoes asterisks and applies backspace to the
+        hidden buffer (WILL ECHO for the duration so SyncTERM does not
+        local-echo the real password).
         """
-        if prompt:
-            await self.send(prompt)
         from core import runner
 
-        text = await runner.read_command(self.bbs, self.session)
+        echo = "*" if secret else None
+        async with runner.secret_echo(self.bbs, self.session, echo):
+            if prompt:
+                await self.send(prompt)
+            text = await runner.read_command(self.bbs, self.session)
         if text is None:
             return ""
         return text.strip("\r\n")
@@ -168,7 +173,7 @@ class LoginFlow:
                 return False                       # EOF / disconnect
             choice = answer.upper()
             if choice == "Q":
-                return False                       # return to main menu
+                return False                       # hang up (logon sequencer disconnects)
             if choice == "R":
                 from .registration import RegistrationFlow
                 await RegistrationFlow(self.bbs, self.totp, self.screens).run(session)
@@ -186,7 +191,9 @@ class LoginFlow:
 
     async def _authenticate(self, session, tty: Terminal, username: str) -> bool:
         """Prompt for the password and validate credentials + optional TOTP."""
-        password = await tty.read_line(f"{ANSI.CYAN}Password: {ANSI.RESET}")
+        password = await tty.read_line(
+            f"{ANSI.CYAN}Password: {ANSI.RESET}", secret=True
+        )
 
         user = await self.bbs.users.get(username)
         if user is None or not user.verify_password(password):

@@ -14,13 +14,18 @@ Input model (two distinct modes):
   it arrives, no Enter. Used for hotkey menus.
 
 Echo policy: SSH echoes keystrokes at the transport layer (``data_received``
-bridge); telnet clients (SyncTERM) do LOCAL echo themselves. Neither reader
-echoes, so there is no double-echo and no raw IAC bytes leak to the display.
+bridge); telnet also echoes the *clean* payload in :func:`_read_chunk`
+(printable as-is, backspace in place). Secret fields set ``session.echo_mask``
+to ``"*"`` and briefly ``WILL ECHO`` so SyncTERM stops local-echoing the
+password. :func:`read_command` applies backspace/DEL to the line buffer —
+painting ``\\b \\b`` without dropping the byte was why a mistyped-then-
+corrected password still failed.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 logger = logging.getLogger("modulo.core.runner")
 
@@ -59,6 +64,73 @@ def _try_arrow(buf: str):
             return key, rest
         return "__SKIP__", rest
     return False
+
+
+def _edit_line_buffer(buf: str) -> str:
+    """Apply backspace/DEL and drop arrow/CSI junk; keep an incomplete ESC.
+
+    Visual echo already paints ``\\b \\b``; without this the line still
+    contained the erased characters (mistype, backspace, retype → auth fail).
+    """
+    out: list[str] = []
+    i = 0
+    n = len(buf)
+    while i < n:
+        ch = buf[i]
+        if ch in ("\x08", "\x7f"):
+            if out:
+                out.pop()
+            i += 1
+            continue
+        if ch == "\x1b":
+            r = _try_arrow(buf[i:])
+            if r is None:
+                return "".join(out) + buf[i:]
+            if r is False:
+                i += 1
+                continue
+            _key, rest = r
+            i = n - len(rest)
+            continue
+        if ch in ("\r", "\n") or ch.isprintable():
+            out.append(ch)
+            i += 1
+            continue
+        i += 1
+    return "".join(out)
+
+
+async def _offer_server_echo(bbs, session, on: bool) -> None:
+    """WILL/WONT ECHO for the secret-field window (telnet only)."""
+    neg = getattr(session, "negotiator", None)
+    if neg is None or bbs is None or not hasattr(bbs, "send_raw"):
+        return
+    from shared.telnet_protocol import IAC, OPT_ECHO, WILL, WONT
+
+    if on:
+        neg.local_options[OPT_ECHO] = True
+        await bbs.send_raw(session, bytes([IAC, WILL, OPT_ECHO]))
+    else:
+        neg.local_options[OPT_ECHO] = False
+        await bbs.send_raw(session, bytes([IAC, WONT, OPT_ECHO]))
+
+
+@asynccontextmanager
+async def secret_echo(bbs, session, mask: str | None):
+    """Mask keystroke echo (``*``) for one password prompt."""
+    if not mask:
+        yield
+        return
+    prev = getattr(session, "echo_mask", None)
+    session.echo_mask = mask
+    session._echoed_cols = 0
+    await _offer_server_echo(bbs, session, True)
+    try:
+        yield
+    finally:
+        session.echo_mask = prev
+        session._echoed_cols = 0
+        await _offer_server_echo(bbs, session, False)
 
 
 def _idle(bbs, session) -> None:
@@ -101,71 +173,103 @@ async def _read_chunk(bbs, session, timeout, *, idle_on_timeout=True):
 
     neg = getattr(session, "negotiator", None)
     if neg is None:
-        return decode_in(data, getattr(session, "codec", "cp437"))
-
-    clean, responses = neg.process_data(data)
-    for resp in responses or []:
-        await bbs.send_raw(session, resp)
-    session.terminal_width, session.terminal_height = neg.window_size
-    session.terminal_type = neg.terminal_type
-
-    text = (
-        decode_in(clean, getattr(session, "codec", "cp437")) if clean else ""
-    )
+        clean = data
+        text = decode_in(data, getattr(session, "codec", "cp437"))
+    else:
+        clean, responses = neg.process_data(data)
+        for resp in responses or []:
+            await bbs.send_raw(session, resp)
+        session.terminal_width, session.terminal_height = neg.window_size
+        session.terminal_type = neg.terminal_type
+        text = (
+            decode_in(clean, getattr(session, "codec", "cp437")) if clean else ""
+        )
 
     # Server-side echo for telnet (SSH echoes at transport layer).
     # Echo the CLEAN bytes only -- never raw IAC negotiation, which was the
-    # source of the CP437 glyph garbage. Printable chars echo as-is; CR/LF
-    # becomes CRLF; Backspace erases in place; ESC sequences pass silent.
+    # source of the CP437 glyph garbage. Printable chars echo as-is (or as
+    # session.echo_mask for passwords); CR/LF becomes CRLF; Backspace erases
+    # in place only when a column was actually echoed; ESC sequences silent.
     # Chat mode (suppress_echo) paints its own feedback instead.
     if not getattr(session, "transport_echoes", False) and not getattr(
         session, "suppress_echo", False
     ):
         echo = bytearray()
+        echoed = int(getattr(session, "_echoed_cols", 0) or 0)
+        mask = getattr(session, "echo_mask", None)
+        mask_b = (
+            mask.encode("ascii", errors="replace")[:1] if mask else None
+        )
         i = 0
         while i < len(clean):
             b = clean[i:i + 1]
             if b == b"\x08" or b == b"\x7f":          # Backspace / DEL
-                echo += b"\b \b"
-            elif b == b"\r" or b == b"\n":            # Enter -> CRLF
+                if echoed > 0:
+                    echo += b"\b \b"
+                    echoed -= 1
+            elif b == b"\r" or b == b"\n":            # Enter -> one CRLF
                 echo += b"\r\n"
+                echoed = 0
+                if b == b"\r" and i + 1 < len(clean) and clean[i + 1:i + 2] == b"\n":
+                    i += 1                            # swallow LF of CRLF
             elif b == b"\x1b":                        # ESC: skip ANSI seq
                 i += 2
             elif b >= b" ":                            # printable
-                echo += b
+                echo += mask_b if mask_b else b
+                echoed += 1
             i += 1
+        session._echoed_cols = echoed
         if echo:
-            await bbs.send(
-                session,
-                decode_in(bytes(echo), getattr(session, "codec", "cp437")),
-            )
+            # Keystroke echo is cursor painting, not a display row — bbs.send
+            # would _pad_line a bare CRLF into 79 spaces and shove Password:
+            # down a blank gutter (SyncTERM CRLF doubles it).
+            if hasattr(bbs, "send_raw"):
+                await bbs.send_raw(session, bytes(echo))
+            else:
+                await bbs.send(
+                    session,
+                    decode_in(bytes(echo), getattr(session, "codec", "cp437")),
+                )
 
     return text
 
 
-async def read_command(bbs, session, timeout: int = IDLE_TIMEOUT) -> str | None:
+async def read_command(
+    bbs,
+    session,
+    timeout: int = IDLE_TIMEOUT,
+    *,
+    echo: str | None = None,
+) -> str | None:
     """Read one LINE of input (CR/LF-terminated).
 
     Handles telnet negotiation, buffers until the terminator arrives, and
-    returns the line *without* its terminator. Returns ``None`` on EOF or
+    returns the line *without* its terminator. Backspace/DEL edit the line
+    (they are not left in the returned string). Returns ``None`` on EOF or
     idle timeout. Never returns a partial line as if it were complete.
+
+    ``echo="*"`` masks keystroke echo for password fields.
     """
-    buf = getattr(session, "_line_buffer", "")
+    async with secret_echo(bbs, session, echo):
+        buf = getattr(session, "_line_buffer", "")
 
-    while True:
-        # Serve a buffered complete line first.
-        for sep in ("\r\n", "\r", "\n"):
-            if sep in buf:
-                line, rest = buf.split(sep, 1)
-                session._line_buffer = rest
-                return line
+        while True:
+            buf = _edit_line_buffer(buf)
+            for sep in ("\r\n", "\r", "\n"):
+                if sep in buf:
+                    line, rest = buf.split(sep, 1)
+                    if sep == "\r" and rest.startswith("\n"):
+                        rest = rest[1:]
+                    session._line_buffer = rest
+                    session._echoed_cols = 0
+                    return line
 
-        chunk = await _read_chunk(bbs, session, timeout)
-        if chunk is None:
-            # EOF / idle: hand back a trailing partial line if one exists.
-            session._line_buffer = ""
-            return buf or None
-        buf += chunk
+            chunk = await _read_chunk(bbs, session, timeout)
+            if chunk is None:
+                # EOF / idle: hand back a trailing partial line if one exists.
+                session._line_buffer = ""
+                return buf or None
+            buf += chunk
 
 
 async def read_key(
