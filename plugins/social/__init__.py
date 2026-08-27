@@ -216,11 +216,12 @@ class SocialPlugin(Plugin):
         on a one-line draft) always opens Post / Editor / Discard. ESC on
         the picker keeps the draft on the prompt; ESC on the prompt leaves
         chat. UP/DOWN scroll history (tail-anchored). Idle polls once a
-        second so other nodes appear as *NEW* bubbles.
+        second so mail that arrived since last leave shows as *NEW*.
         """
         import time
 
         from plugins.social.bubbles import render_bubbles
+        from plugins.social.social import new_badge_from_id
         from shared.textwrap import wrap as _tw_wrap
 
         cid = conv["id"]
@@ -282,7 +283,15 @@ class SocialPlugin(Plugin):
                 msgs = await self.bbs.conversations.list_messages(cid)
             except Exception:
                 msgs = []
-            baseline = max((int(m.get("id", 0)) for m in msgs), default=0)
+            try:
+                watermark = await self.bbs.conversations.get_last_read(uname, cid)
+            except Exception:
+                watermark = 0
+            new_from = new_badge_from_id(watermark)
+            try:
+                await self.bbs.conversations.mark_read(uname, cid)
+            except Exception:
+                pass
             scroll_back = 0
             draft = ""
             rows = input_rows(draft)
@@ -292,7 +301,7 @@ class SocialPlugin(Plugin):
             await self.bbs.send(session, "\x1b[2J\x1b[H")
 
             async def after_editor_or_picker(new_draft: str) -> None:
-                nonlocal draft, rows, last_fp, baseline, scroll_back, msgs
+                nonlocal draft, rows, last_fp, scroll_back, msgs
                 draft = new_draft
                 rows = input_rows(draft)
                 last_fp = None
@@ -301,8 +310,6 @@ class SocialPlugin(Plugin):
                 except Exception:
                     fresh = msgs
                 msgs = fresh
-                baseline = max(
-                    (int(m.get("id", 0)) for m in fresh), default=baseline)
 
             async def offer_draft() -> None:
                 """Post / Editor / Discard. After the notepad, paint first."""
@@ -341,7 +348,7 @@ class SocialPlugin(Plugin):
                     for m in reversed(window):
                         grows = render_bubbles(
                             [m], w, username=uname,
-                            new_from_id=baseline + 1, plain=is_plain,
+                            new_from_id=new_from, plain=is_plain,
                             palette=None if is_plain else pal)
                         if used + len(grows) > budget:
                             break
@@ -351,7 +358,10 @@ class SocialPlugin(Plugin):
                     for grows in reversed(groups):
                         vis_rows.extend(grows)
 
-                    new_count = sum(1 for m in msgs if int(m.get("id", 0)) > baseline)
+                    new_count = (
+                        sum(1 for m in msgs if int(m.get("id", 0)) >= new_from)
+                        if new_from else 0
+                    )
                     title = str(conv.get("title", cid))
                     head = (
                         f" {title} - {len(msgs)} msgs - "
@@ -438,13 +448,6 @@ class SocialPlugin(Plugin):
 
             try:
                 await self.bbs.conversations.mark_read(uname, cid)
-                seen = getattr(session, "_social_seen", None)
-                if not isinstance(seen, dict):
-                    seen = {}
-                    session._social_seen = seen  # type: ignore[attr-defined]
-                seen[cid] = max(
-                    (int(m.get("id", 0)) for m in (msgs or [])), default=0
-                )
             except Exception:
                 pass
         finally:

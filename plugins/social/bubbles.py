@@ -3,7 +3,7 @@
 Pure function: messages in, display rows out. CP437-safe box drawing,
 every emitted row exactly ``width`` visible columns, ANSI-colored unless
 plain. Own messages align right in the theme accent, others align left in
-success; messages that arrived after the viewer entered the room carry a
+success; messages that arrived after the viewer last left the room carry a
 NEW tag (warning colour on ANSI). Pass ``palette=`` to recolor; default
 is the classic cyan/green look so tests stay stable.
 """
@@ -33,8 +33,8 @@ def render_bubbles(
 ) -> list[str]:
     """Render *msgs* (oldest first) as stacked chat bubbles.
 
-    ``new_from_id`` marks the first id considered "arrived this session"
-    (badge on other people's messages only). ``compact`` summarizes:
+    ``new_from_id`` marks the first id considered new since last leave
+    (badge on other people's messages only; 0 = none). ``compact`` summarizes:
     author-only title bar, first body line only, no gap rows.
     """
     if width < 9:

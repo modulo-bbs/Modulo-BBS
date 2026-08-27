@@ -19,6 +19,7 @@ from plugins.mainmenu import MainmenuPlugin
 from plugins.modal import ModalPlugin
 from plugins.modal.overlay import compact_overlay_geom, paint_overlay
 from plugins.social import _collapse_overlay_spacing
+from plugins.social.social import new_badge_from_id, render_social
 from server.session import Session
 
 
@@ -672,3 +673,63 @@ def test_notepad_enter_and_lf_insert_not_send(tmp_path):
         assert draft == "\nx\n"
 
     asyncio.run(_a())
+
+
+def test_new_badge_from_id_skips_never_visited():
+    assert new_badge_from_id(0) == 0
+    assert new_badge_from_id(5) == 6
+
+
+def _preview(app, user, sel=1):
+    s = _session(user)
+    s._pim_selected = sel
+    return asyncio.run(render_social(app.conversations, s))
+
+
+def test_never_opened_preview_has_star_not_new(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    out = _preview(app, dave)
+    assert "hello room" in out
+    assert "*" in out
+    assert "*NEW*" not in out
+    assert asyncio.run(app.conversations.unread_count("dave", "b1")) == 1
+
+
+def test_after_open_preview_clears_star_and_new(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    _run_chat(s, app, {"id": "b1", "title": "General"}, iter(["ESC"]))
+    out = _preview(app, dave)
+    assert "hello room" in out
+    assert "*NEW*" not in out
+    assert asyncio.run(app.conversations.unread_count("dave", "b1")) == 0
+    assert "*NEW*" not in _plain(s)
+
+
+def test_mail_while_away_stars_and_badges_then_clears(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    _run_chat(s, app, {"id": "b1", "title": "General"}, iter(["ESC"]))
+    asyncio.run(app.conversations.post_message(
+        "b1", author="api_test", body="while you were out"))
+    out = _preview(app, dave)
+    assert "*" in out
+    assert "*NEW*" in out
+    assert "while you were out" in out
+    assert asyncio.run(app.conversations.unread_count("dave", "b1")) == 1
+    s2 = _session(dave)
+    _run_chat(s2, app, {"id": "b1", "title": "General"}, iter(["ESC"]))
+    chat = _plain(s2)
+    assert "*NEW*" in chat
+    assert "while you were out" in chat
+    hello_hdr = chat.split("hello room")[0].rsplit("ana", 1)[-1]
+    assert "*NEW*" not in hello_hdr
+    out2 = _preview(app, dave)
+    assert "*NEW*" not in out2
+    assert asyncio.run(app.conversations.unread_count("dave", "b1")) == 0

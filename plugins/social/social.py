@@ -32,6 +32,12 @@ PANE_INNER = PANE_CELL - 2
 SOCIAL_HINT = "  Enter chat · Up/Dn rooms · N new thread · Space/PgUp/PgDn peek · ESC back"[:79]
 
 
+def new_badge_from_id(last_read: int) -> int:
+    """First message id that earns *NEW*. 0 = never visited (star only)."""
+    last = int(last_read or 0)
+    return last + 1 if last else 0
+
+
 @dataclass
 class Room:
     """One selectable sidebar row."""
@@ -200,14 +206,15 @@ async def render_social(conversations, session) -> str:
     # -- build message lines for the pane ------------------------------------
     # B8: compact bubbles (summarized) instead of the old #id [author] list.
     # Tail-anchored; _social_scroll_up now counts MESSAGES scrolled past.
-    seen = getattr(session, "_social_seen", None)
-    if not isinstance(seen, dict):
-        seen = {}
+    # *NEW* = arrived since last leave (last_read); never-opened → star only.
+    last_read = 0
+    if username and thread_conv is not None:
         try:
-            session._social_seen = seen
+            last_read = await conversations.get_last_read(
+                username, thread_conv["id"])
         except Exception:
-            pass
-    new_from = int(seen.get(cur_id, 0) or 0)
+            last_read = 0
+    new_from = new_badge_from_id(last_read)
 
     from plugins.social.bubbles import render_bubbles as _render_bubbles
 

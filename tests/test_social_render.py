@@ -48,6 +48,7 @@ class StubConvs:
             ],
         }
         self.unread = {("dave", "dm-ana"): 2, ("dave", "general-discussion"): 2}
+        self.last_read = {}
 
     async def list_conversations(self, *, kind=None, visible_to=None):
         out = [c for c in self.index if c["kind"] == kind]
@@ -67,6 +68,9 @@ class StubConvs:
 
     async def unread_count(self, username, conv_id):
         return self.unread.get((username, conv_id), 0)
+
+    async def get_last_read(self, username, conv_id):
+        return self.last_read.get((username, conv_id), 0)
 
 
 def _session(user=None, h=24, plain=True, sel=0):
@@ -100,6 +104,8 @@ def test_plain_layout_widths_and_rows():
         assert "N new thread" in joined
         # board row selected marker + unread star, title capped at 15
         assert "> General Discuss" in joined and "*" in joined
+        # never opened: star only, no *NEW* on the old posts
+        assert "*NEW*" not in joined
         # thread pane: compact bubbles, author-only title bars (B8)
         assert "General Discuss" in joined
         assert "dave" in joined and "api_test" in joined
@@ -116,6 +122,22 @@ def test_plain_layout_widths_and_rows():
         sep = side[dms_i + 1]
         assert set(sep.strip()) <= set("-─ ")
         assert "new" not in sep.lower()
+
+    asyncio.run(_a())
+
+
+def test_preview_new_badge_only_on_mail_since_last_leave():
+    async def _a():
+        c = StubConvs()
+        c.last_read = {("dave", "general-discussion"): 1}
+        c.unread[("dave", "general-discussion")] = 1
+        s = _session(User(username="dave"), sel=2)
+        out = await render_social(c, s)
+        assert "*NEW*" in out
+        assert "api_test" in out
+        # dave's older post is below the watermark — no badge on that body
+        dave_block = out.split("api_test")[0]
+        assert "*NEW*" not in dave_block
 
     asyncio.run(_a())
 

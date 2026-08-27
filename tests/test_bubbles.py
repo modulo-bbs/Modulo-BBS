@@ -2,7 +2,7 @@
 
 Pure-function contract: every row exactly *width* visible columns; own
 bubbles right-aligned cyan, others left green; NEW badge on messages that
-arrived after the viewer entered (never on own); compact summarizes.
+arrived after last leave (never on own); compact summarizes.
 """
 from __future__ import annotations
 
