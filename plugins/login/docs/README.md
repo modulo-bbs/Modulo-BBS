@@ -15,8 +15,11 @@ Resolved from `plugins/login/screens/` (`.ans` > `.asc` > `.txt`).
 | `totp_setup` | Shows your TOTP secret + otpauth URI for enrolment |
 | `totp_verify` | 6-digit code prompt during login |
 
-All standard tokens work. `totp_setup` receives `{SECRET}` and
-`{OTPAUTH}` ad-hoc values from the flow.
+All standard tokens work, including semantic `{ACCENT}` / `{SUCCESS}` /
+`{WARNING}` / `{TEXT}` / `{MUTED}` (classic palette until the user is
+logged in — `/theme` applies after bind). See `docs/themes.md`.
+`totp_setup` receives `{SECRET}` and `{OTPAUTH}` ad-hoc values from the
+flow.
 
 ## Keys
 

@@ -95,6 +95,35 @@ class TestTokens:
         out = app.screens.render(None, "demo", "t")
         assert out == ANSI_TOKENS["BRIGHT_CYAN"] + "hi" + ANSI_TOKENS["RESET"]
 
+    def test_accent_follows_session_theme(self, app, tmp_path):
+        from core.theme import load_palette
+        from core.user import User
+        from server.session import Session
+        from shared.telnet_protocol import ANSI
+
+        self._screen(app, tmp_path, b"{ACCENT}hi{RESET}")
+        anon = app.screens.render(None, "demo", "t")
+        assert anon == load_palette("classic").accent + "hi" + ANSI.RESET
+
+        s = Session(session_id="t", node_id=1, address=("h", 1))
+        s.user = User(username="dave", preferences={"theme": "amber"})
+        out = app.screens.render(s, "demo", "t")
+        assert out == load_palette("amber").accent + "hi" + ANSI.RESET
+        assert load_palette("amber").accent == ANSI.BRIGHT_YELLOW
+
+    def test_literal_bright_cyan_not_remapped(self, app, tmp_path):
+        """Semantic roles follow the theme; {BRIGHT_CYAN} stays actual cyan."""
+        from core.user import User
+        from server.session import Session
+
+        self._screen(app, tmp_path, b"{BRIGHT_CYAN}x{ACCENT}")
+        s = Session(session_id="t", node_id=1, address=("h", 1))
+        s.user = User(username="dave", preferences={"theme": "amber"})
+        out = app.screens.render(s, "demo", "t")
+        assert out.startswith(ANSI_TOKENS["BRIGHT_CYAN"])
+        from core.theme import load_palette
+        assert out.endswith(load_palette("amber").accent)
+
     def test_core_tokens(self, app, tmp_path):
         self._screen(app, tmp_path, b"{bbsname}|{time}|{date}")
         out = app.screens.render(None, "demo", "t")
@@ -178,3 +207,38 @@ class TestSend:
         assert bytes(s.writer.buffer) == b"hello -\r\n" or b"hello" in (
             bytes(s.writer.buffer)
         )
+
+
+_THEME_ROLES = (
+    "ACCENT", "SUCCESS", "WARNING", "ERROR", "MUTED", "TEXT", "TAB_FG", "TAB_BG",
+)
+
+
+class TestShippedScreens:
+    """Production .txt templates must decode through ScreenService, not leak
+    ``{ACCENT}`` as literal text the way a stale server did on login."""
+
+    def test_login_and_logon_txt_leave_no_role_tokens(self, tmp_path):
+        from core.app import BBSApp
+
+        # Fresh app keeps the real plugins_root (repo), unlike the fixture.
+        app = BBSApp(users_dir=tmp_path / "users")
+        shipped = (
+            ("logon", "splash"),
+            ("logon", "welcome"),
+            ("login", "login"),
+            ("login", "register"),
+            ("login", "totp_setup"),
+            ("login", "totp_verify"),
+        )
+        for plugin, name in shipped:
+            extra = (
+                {"SECRET": "X", "USERNAME": "dave"}
+                if name == "totp_setup"
+                else {}
+            )
+            out = app.screens.render(None, plugin, name, **extra)
+            for tok in _THEME_ROLES:
+                assert "{" + tok + "}" not in out, f"{plugin}/{name} leaked {{{tok}}}"
+            assert "\x1b[" in out
+

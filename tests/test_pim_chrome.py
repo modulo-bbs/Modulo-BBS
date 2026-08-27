@@ -96,6 +96,8 @@ def test_pim_shows_tabs_and_pane(tmp_path):
     assert "hello world" in text or "General" in text or "dave" in text
     # prompt is pinned at bottom (contains >)
     assert ">" in text
+    from shared.telnet_protocol import ANSI
+    assert ANSI.BG_BLUE in text  # classic active-tab background
 
 
 def test_social_tab_keeps_tab_bar_on_24_row_terminal(tmp_path):
@@ -174,3 +176,33 @@ def test_classic_fallback_when_home_mode_menu(tmp_path):
     # classic contains Main Menu, not the PIM tab bar
     assert "Main Menu" in text
     assert "up/dn select" not in text
+
+
+def test_amber_theme_recolors_active_tab(tmp_path):
+    from shared.telnet_protocol import ANSI
+
+    app = _app(tmp_path)
+    user = User(username="dave", groups=[], preferences={"theme": "amber"})
+    s = _session(user)
+    p = app.get_plugin("mainmenu")
+    asyncio.run(p._show_menu(s))  # type: ignore[attr-defined]
+    text = s.writer.text()  # type: ignore[union-attr]
+    assert ANSI.BG_YELLOW in text
+    assert ANSI.BG_BLUE not in text
+
+
+def test_matrix_paints_list_in_phosphor(tmp_path):
+    """CRT mono must colour body text and selection, not leave gray+REVERSE."""
+    from shared.telnet_protocol import ANSI
+
+    app = _app(tmp_path)
+    user = User(username="dave", groups=[], preferences={"theme": "matrix"})
+    s = _session(user)
+    p = app.get_plugin("mainmenu")
+    asyncio.run(p._show_menu(s))  # type: ignore[attr-defined]
+    text = s.writer.text()  # type: ignore[union-attr]
+    assert ANSI.BRIGHT_GREEN in text
+    assert ANSI.GREEN in text
+    assert ANSI.BG_GREEN in text
+    assert ANSI.REVERSE not in text
+    assert ANSI.DIM not in text

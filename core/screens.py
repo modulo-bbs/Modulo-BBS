@@ -10,8 +10,9 @@ Resolution is by extension priority per name: ``.ans`` → ``.asc`` → ``.txt``
 The extension says only how the bytes decode; every file goes through the
 identical pipeline — read bytes (CRLF preserved), decode, substitute tokens,
 return. Tokens are inline: ``{username}``, ``{time}``, ``{node}``, plus any
-registered provider's namespaced tokens (``{boards.count}`` …). ANSI colour
-constants from the classic ``{BRIGHT_CYAN}`` family also substitute anywhere.
+registered provider's namespaced tokens (``{boards.count}`` …). Semantic
+theme roles (``{ACCENT}``, ``{SUCCESS}``, …) follow the caller's saved
+theme; literal ``{BRIGHT_CYAN}`` family tokens stay actual cyan.
 
 When no file exists, a plugin-registered *generator* produces the screen in
 code (the migration path for today's inline renderers): file beats generator,
@@ -126,9 +127,13 @@ class ScreenService:
             else:
                 session_secs = 0
             mgr = getattr(ctx.bbs, "session_manager", None)
-            return {
-                "bbsname": "Modulo BBS",
-                "version": "0.1-alpha",
+            from core.theme import palette_for
+            from core.version import NAME, VERSION
+
+            values: dict[str, object] = {
+                "bbsname": NAME,
+                "version": VERSION,
+                "VERSION": VERSION,
                 "time": now.strftime("%H:%M"),
                 "date": now.strftime("%m/%d/%y"),
                 "datetime": now.strftime("%m/%d/%y %H:%M"),
@@ -141,6 +146,8 @@ class ScreenService:
                 "termheight": getattr(session, "terminal_height", 24),
                 "sessiontime": f"{session_secs // 60:02d}:{session_secs % 60:02d}",
             }
+            values.update(palette_for(ctx.session).tokens())
+            return values
 
         self.register_provider(core_tokens)
 
@@ -260,7 +267,15 @@ class ScreenService:
     # -- tokens -----------------------------------------------------------------
 
     def substitute(self, text: str, session, **extra: object) -> str:
-        """Swap ANSI constants + every provider's tokens + ad-hoc extras."""
+        """Swap ANSI constants + every provider's tokens + ad-hoc extras.
+
+        Semantic theme roles (``{ACCENT}``, ``{SUCCESS}``, …) come from
+        ``core.theme.palette_for(session)`` and are applied *before* the
+        literal ``{BRIGHT_CYAN}`` map, so leftover colour-name tokens stay
+        actual cyan. Ad-hoc ``**extra`` wins last.
+        """
+        from core.theme import palette_for
+
         ctx = TokenContext(session=session, bbs=self.bbs)
         values: dict[str, object] = {}
         for provider in self._providers:
@@ -268,8 +283,9 @@ class ScreenService:
                 values.update(provider(ctx) or {})
             except Exception:  # noqa: BLE001 - one bad provider can't kill a screen
                 logger.exception("token provider failed")
-        values.update(extra)
+        values.update(palette_for(session).tokens())
         values.update(ANSI_TOKENS)
+        values.update(extra)
         for key, val in values.items():
             text = text.replace("{" + key + "}", str(val))
         return text

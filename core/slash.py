@@ -7,6 +7,12 @@ Recommended plugin convention (see docs/screens.md):
 * Core owns ``/screen`` — it prints the generated (permission-filtered)
   default menu of the current interface, bypassing any file reskin. A sysop
   on an artsy override can always summon the real command surface.
+* Core owns ``/theme`` — list or set the caller's named colour palette
+  (a ``themes/*.theme`` file, saved on ``preferences.theme``). At the home
+  ``>`` prompt the mainmenu plugin turns a bare ``/theme`` into an up/down
+  overlay picker; see ``docs/themes.md``.
+* Core owns ``/ver`` (and ``/version``) — print the board version so a
+  caller can tell which build is running. See ``core/version.py``.
 * Plugins may register extra slash commands; keep them lowercase and
   namespaced to the plugin when they're not universal.
 
@@ -39,15 +45,32 @@ async def handle_slash(bbs, session, line: str) -> bool:
     caller's loop just re-prompts.
     """
     text = (line or "").strip()
-    if not text.startswith("/"):
+    if not text:
         return False
+    # "//theme" (typed the slash twice after the hotkey consumed the first)
+    # and "/theme" should dispatch the same way.
+    if not text.startswith("/"):
+        text = "/" + text
+    else:
+        text = "/" + text.lstrip("/")
     parts = text[1:].split(None, 1)
     word = (parts[0] if parts else "").lower()
     arg = parts[1].strip() if len(parts) > 1 else ""
 
+    # Bare "/" or "/help" — list commands.
+    if word in ("", "help"):
+        await _cmd_help(bbs, session, arg)
+        return True
+
     # /screen is core-owned: the generated, permission-aware view.
     if word == "screen":
         await _cmd_screen(bbs, session, arg)
+        return True
+    if word == "theme":
+        await _cmd_theme(bbs, session, arg)
+        return True
+    if word in ("ver", "version"):
+        await _cmd_ver(bbs, session, arg)
         return True
 
     fn = _HANDLERS.get(word)
@@ -62,7 +85,7 @@ async def handle_slash(bbs, session, line: str) -> bool:
 
     await bbs.send(
         session,
-        "\r\nUnknown command. Try /screen (show real menu), /help.\r\n",
+        "\r\nUnknown command. Try /screen, /theme, /ver, /help.\r\n",
     )
     return True
 
@@ -142,8 +165,73 @@ async def _cmd_screen(bbs, session, arg: str) -> None:
         )
 
 
+async def _cmd_theme(bbs, session, arg: str) -> None:
+    """``/theme`` — list palettes, or ``/theme amber`` to persist one.
+
+    Saved on ``preferences.theme``; plugins resolve it via
+    ``core.theme.palette_for(session)``. Login required to change it.
+    """
+    from core.theme import load_palette, resolve_theme_name, theme_aliases, theme_name_for, theme_names
+
+    name = (arg or "").strip().lower()
+    current = theme_name_for(session)
+    names = theme_names()
+    aliases = theme_aliases()
+
+    if not name:
+        lines = ["", f"Themes (current: {current}):"]
+        for t in names:
+            mark = " *" if t == current else ""
+            lines.append(f"  {t}{mark}")
+        lines.append("Use /theme <name> to switch.")
+        if aliases:
+            bits = ", ".join(f"{a} → {c}" for a, c in sorted(aliases.items()))
+            lines.append(f"Aliases: {bits}.")
+        await bbs.send(session, "\r\n".join(lines) + "\r\n")
+        return
+
+    if name not in names and name not in aliases:
+        await bbs.send(
+            session,
+            "\r\n! unknown theme. Try /theme ("
+            + ", ".join(names)
+            + ").\r\n",
+        )
+        return
+
+    chosen = resolve_theme_name(name)
+
+    user = getattr(session, "user", None)
+    if user is None:
+        await bbs.send(
+            session, "\r\n! login required to save a theme preference\r\n"
+        )
+        return
+
+    prefs = dict(getattr(user, "preferences", None) or {})
+    prefs["theme"] = chosen
+    try:
+        await bbs.users.update(user.username, preferences=prefs)
+        fresh = await bbs.users.get(user.username)
+        if fresh is not None:
+            session.user = fresh
+    except Exception:  # noqa: BLE001
+        logger.exception("could not save theme preference")
+        await bbs.send(session, "\r\n! could not save preference\r\n")
+        return
+
+    await bbs.send(session, f"\r\n* Theme set to {chosen}.\r\n")
+
+
+async def _cmd_ver(bbs, session, arg: str) -> None:
+    """``/ver`` — board version (and git short hash when available)."""
+    from core.version import NAME, display
+
+    await bbs.send(session, f"\r\n{NAME} {display()}\r\n")
+
+
 async def _cmd_help(bbs, session, arg: str) -> None:
-    cmds = ["/screen"] + sorted("/" + c for c in _HANDLERS)
+    cmds = ["/screen", "/theme", "/ver"] + sorted("/" + c for c in _HANDLERS)
     await bbs.send(session, "\r\nCommands: " + ", ".join(cmds) + "\r\n")
 
 

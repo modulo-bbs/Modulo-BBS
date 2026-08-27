@@ -1,0 +1,12 @@
+# Green phosphor CRT. Every role is a shade of green.
+order=50
+alias=phosphor
+alias=hacker
+accent=10
+success=2
+warning=10
+error=2
+muted=2
+text=10
+prompt=2
+highlight=0,2

@@ -1,0 +1,10 @@
+# Magenta mixed palette. Errors stay red.
+order=40
+accent=13
+success=11
+warning=14
+error=12
+muted=5
+text=15
+prompt=11
+highlight=15,5

@@ -21,8 +21,13 @@ bottom `>` prompt. Classic list is still available via `home_mode=menu`.
 |---|---|---|---|
 | `home_mode` | `pim` / `menu` | `pim` | `pim` = tabbed home; `menu` = classic list |
 | `screen_mode` | `generated` / (unset) | unset | `generated` = skip skins, show generated defaults (see `docs/screens.md` `/screen` toggle) |
+| `theme` | stem of a `themes/*.theme` file | `classic` | named colour palette; drop a file to add one (`docs/themes.md`) |
 
-Toggle at runtime: `/screen` flips `screen_mode`; classic vs PIM is stored in
+Switch at runtime: at the home `>` prompt press `/`, type `theme`, Enter —
+up/down picker, overlay previews the highlight, Enter saves, ESC cancels.
+`theme amber` still sets a name without the picker. `/` then `help` lists
+commands (no second slash). Palettes are files in `themes/` (`docs/themes.md`).
+Classic vs PIM is stored in
 `home_mode` (set via `users.update` or a future `/home` command — currently
 manual via prefs; the menu respects it immediately).
 
@@ -55,7 +60,12 @@ Keys inside the PIM (numbers reserved for tabs — selection uses up/dn+Enter):
 - Social pane: `N` new thread (title ≤15; empty/whitespace silently aborts —
   no conversation, no cancelled banner). There is no `+ new thread` sidebar
   row; DMs is the pinned aggregate, then a separator, then rooms.
-- `/` → slash commands (`/screen`, `/help`) — same as classic
+- `/` then a command + Enter → slash commands (`theme`, `theme amber`,
+  `screen`, `ver`, `help`). The `>` is a **single-key** prompt, not a shell: the
+  `/` is the hotkey; type the rest and press Enter. Bare `theme` opens an
+  up/down overlay picker (Enter applies, ESC cancels; the box previews the
+  highlighted palette). Other commands paint in a bordered overlay; any
+  key dismisses, then the tabs redraw.
 
 The Social two-pane must leave a row for the tab bar and a row for the `>`
 prompt on 80×24; filling the screen used to scroll `Dashboard | Social | …`
@@ -64,9 +74,10 @@ off the top of SyncTERM.
 ## Social chat (B8, Dave's Telegram-style surface)
 
 ENTER on a Social room opens a full-screen chat. Bubbles are **me vs
-everyone else**, not per-person colors: your messages sit **right / cyan**,
-every other author sits **left / green** (tell people apart by the name in
-the title bar). `*NEW*` (yellow) marks other people's messages that arrived
+everyone else**, not per-person colors: your messages sit **right / accent**,
+every other author sits **left / success** (tell people apart by the name in
+the title bar). Classic theme is cyan / green; `/theme` switches the palette.
+`*NEW*` (warning colour; yellow in classic) marks other people's messages that arrived
 after you entered the room. Tail-anchored entry; 1s polling so other nodes
 appear live. Keys:
 
@@ -86,7 +97,7 @@ wire — the trailing LF is swallowed), Shift-Enter is byte-identical to Enter,
 
 ### Overlay notepad editor (`Ctrl-E`)
 
-A bright-green bordered box overlays the live chat; the draft renders inside it
+A themed (success-colour) bordered box overlays the live chat; the draft renders inside it
 from the top with soft wrap. Notepad-style caret editing: arrows move the caret
 anywhere in the box, `Enter` opens a line, `Backspace` joins, typing inserts at
 the caret. Capacity is hard-capped to the box (an edit that would not fit is

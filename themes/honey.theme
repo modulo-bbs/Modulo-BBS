@@ -1,0 +1,11 @@
+# Amber phosphor CRT. Every role is a shade of yellow/brown.
+order=60
+alias=ambercrt
+accent=14
+success=6
+warning=14
+error=6
+muted=6
+text=14
+prompt=6
+highlight=0,6

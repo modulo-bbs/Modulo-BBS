@@ -11,6 +11,21 @@ Modulo is a modular, plugin-based Bulletin Board System built in Python 3.11+ wi
 3. **API-first** — everything accessible via HTTP API for external tools
 4. **Transport-agnostic** — core logic doesn't know or care about telnet vs SSH
 5. **CP437 native** — raw bytes throughout, no UTF-8 mangling
+6. **Two audiences, one contract** — a sysop can edit the board themselves
+   (drop a theme, a screen) **or** direct an agent to do it. Same files,
+   same docs path. The agent path is first-class; in-board editors are
+   accessories. Human-facing docs never mix in assistant instructions
+   (those live in `.cursor/rules/`).
+7. **A board, not a toolkit** — first start should feel like a BBS, not a
+   configuration exam. Most packages overwhelm; the north star is TriBBS
+   (Mark Goodwin): opinionated defaults, a working board immediately,
+   power (themes, screens, plugins) behind files when you want it — not
+   400 knobs on day one.
+8. **Call things what they are** — a server is a server, not a gateway
+   node. The directory name says what is inside; the filename says what
+   the file does. Keep great docs, but a sysop should get a basic board
+   running from **`README.md`** alone. We will not get this perfect; we
+   keep it in mind on every name and every file.
 
 ## Directory Structure
 
@@ -24,6 +39,8 @@ modulo-bbs/
 │   ├── events.py            # Event bus
 │   ├── keys.py              # Plugin keybinding loader (plugins/<name>/keys)
 │   ├── loader.py            # Plugin discovery + loading
+│   ├── theme.py             # palettes from themes/*.theme + palette_for(session)
+│   ├── version.py           # VERSION + git short hash for /ver
 │   └── storage.py           # PluginStorage: bbs.storage.dir(name)
 ├── plugins/                 # All plugins (self-contained)
 │   ├── base.py              # Plugin interface (not a plugin itself)
@@ -47,9 +64,11 @@ modulo-bbs/
 ├── tools/                   # Dev + ops tools
 ├── docs/                    # Documentation
 ├── keys/                    # SSH host keys (gitignored)
+├── themes/                  # *.theme files (DOS fg,bg palettes; drop-in)
 ├── users/                   # User data (core-owned, one JSON per account)
 ├── client/                  # Dev/test terminal client
 ├── run_server.py            # Entry point
+├── README.md                # Get a board running
 ├── config.yaml              # Server configuration
 ├── LICENSE                  # Apache 2.0
 ├── TRADEMARK.md             # Trademark policy
@@ -84,11 +103,18 @@ Boards→Social unification (2026-08-25) the default tab row is
 (room sidebar + live thread pane) that replaced the Boards tab and absorbed
 DMs as its pinned row (`N` creates a thread; empty title aborts; there is
 no painted `+ new thread` row). Chat bubbles are me-vs-everyone-else
-(right/cyan vs left/green). All reads/writes flow through
+(right/accent vs left/success; classic is cyan/green). All reads/writes flow through
 `core/conversations.py`. The Social pane leaves rows for the tab bar and
 the bottom `>` so 80×24 SyncTERM does not scroll the tabs off.
 File `pim.*` beats the generated chrome; `preferences.home_mode` toggles
-classic vs PIM.
+classic vs PIM. `preferences.theme` (classic / amber / green / magenta
+mixed, or matrix / honey CRT mono)
+recolors generated chrome and `{ACCENT}` token screens after login via
+`core.theme.palette_for(session)`. Palettes are `themes/*.theme` files
+(DOS `fg,bg` numbers; missing keys default to classic). `/theme` at the
+home `>` prompt is an up/down overlay picker with a live preview;
+`/theme amber` sets a name directly. How to write a file: **`docs/themes.md`**.
+`.ans` art is not rethemed.
 
 Classic board shape (when `home_mode=menu`; PIM replaces the list with tabs;
 the [M] interactive flow is retired — messageboard only owns board

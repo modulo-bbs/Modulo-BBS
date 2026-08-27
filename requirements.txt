@@ -1,0 +1,8 @@
+# Runtime deps (pip install -r requirements.txt)
+# Restored 2026-08-25 after the sandbox env wipe — pin what's known-good.
+bcrypt==5.0.0        # user password hashing (core/user.py)
+pyotp==2.10.0        # TOTP two-factor login (core/totp.py)
+asyncssh==2.24.0     # SSH listener :6422 (server/ssh_server.py; pulls cryptography/cffi)
+
+# Test suite
+pytest==9.0.3

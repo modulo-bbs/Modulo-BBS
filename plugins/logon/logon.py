@@ -112,7 +112,7 @@ class LogonPlugin(Plugin):
 
         The service resolves the best existing variant (``.ans`` > ``.asc``
         > ``.txt``) from ``screens/`` and substitutes tokens ({NODE},
-        {NAME}, {ACTIVE}, {BRIGHT_CYAN} …).
+        {NAME}, {ACTIVE}, {ACCENT} …).
         """
         stem = filename.rsplit(".", 1)[0]
         svc = getattr(self.bbs, "screens", None)
@@ -129,7 +129,7 @@ class LogonPlugin(Plugin):
         text = path.read_bytes().decode("utf-8", errors="replace")
         from core import banner as _banner
 
-        text = _banner.substitute_tokens(text, **self._placeholders(session))
+        text = _banner.substitute_tokens(text, session=session, **self._placeholders(session))
         await self.bbs.send(session, text)
         self._emit(session, f"screen:{filename}", "displayed")
 
@@ -171,12 +171,14 @@ class LogonPlugin(Plugin):
         user = getattr(session, "user", None)
         if getattr(session, "authenticated", False) and user is not None:
             name = getattr(user, "display_name", "") or getattr(session, "username", "")
+        from core.version import display
+
         return {
             "NODE": getattr(session, "node_id", 0),
             "TTERM": getattr(session, "terminal_type", "UNKNOWN"),
             "TW": getattr(session, "terminal_width", 80),
             "TH": getattr(session, "terminal_height", 24),
-            "VERSION": "0.1-alpha",
+            "VERSION": display(),
             "PYTHON": sys.version.split()[0],
             "ACTIVE": mgr.active_count,
             "MAXNODES": mgr.max_nodes,

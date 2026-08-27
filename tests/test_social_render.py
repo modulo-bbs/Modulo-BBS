@@ -137,9 +137,12 @@ def test_selection_moves_highlight_and_pane():
 
 def test_ansi_variant_highlights_selected_row():
     async def _a():
+        from core.theme import load_palette
+
         s = _session(User(username="dave"), plain=False, sel=0)
         out = await render_social(StubConvs(), s)
-        assert "\x1b[7m" in out or "\x1b[2m" in out  # REVERSE or DIM used
+        pal = load_palette("classic")
+        assert pal.tab_bg in out  # highlight=15,1 → blue selection bar
         _all_lines_79(out.split("\r\n"))
 
     asyncio.run(_a())

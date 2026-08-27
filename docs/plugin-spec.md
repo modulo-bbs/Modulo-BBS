@@ -69,8 +69,21 @@ class User:
     last_login: datetime
     groups: list[str]            # ["user"], ["sysop"], ["moderator", ...]
     stats: dict                  # Per-plugin stats (posts, files, etc.)
-    preferences: dict            # Theme, notifications, etc.
+    preferences: dict            # theme, encoding, home_mode, screen_mode, …
 ```
+
+Saved preference keys (plain dict; unknown keys are ignored):
+
+| Key | Values | Default | Effect |
+|---|---|---|---|
+| `theme` | stem of a `themes/*.theme` file (`classic`, `amber`, `matrix`, … or one you dropped) | `classic` | Colour palette after login (`core.theme.palette_for`). Files are DOS `fg,bg` lines; missing keys default to classic. Aliases come from `alias=` in the file (`phosphor` → `matrix`). `/theme` opens a picker; `/theme amber` sets it. How-to: `docs/themes.md`. |
+| `encoding` | `cp437` / `utf-8` / `ascii` | (detect) | Wire codec |
+| `home_mode` | `pim` / `menu` | `pim` | Tabbed PIM vs classic list |
+| `screen_mode` | `generated` / unset | unset | `/screen` machine view |
+
+Plugins read `session.user.preferences` (and `palette_for(session)` for
+colour). The event bus does **not** deliver prefs. Adding a named
+palette: `docs/themes.md`.
 
 **Core provides:**
 - `bbs.users.get(username)` → User

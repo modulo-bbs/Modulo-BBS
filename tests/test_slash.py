@@ -172,6 +172,74 @@ class TestScreenCommand:
         assert "Unknown command" in text_of(s)
 
 
+class TestThemeCommand:
+    def test_list_marks_current(self, app):
+        s = make_session()
+        s.user = run(_real_user(app, "themer", ["user"]))
+        run(_drive(app, s, "/theme"))
+        out = text_of(s)
+        assert "classic *" in out
+        assert "amber" in out
+        assert "green" in out
+        assert "magenta" in out
+        assert "matrix" in out
+        assert "honey" in out
+
+    def test_set_persists_and_refreshes_session(self, app):
+        s = make_session()
+        s.user = run(_real_user(app, "painter", ["user"]))
+        run(_drive(app, s, "/theme amber"))
+        assert "Theme set to amber" in text_of(s)
+        assert s.user.preferences.get("theme") == "amber"
+        fresh = run(app.users.get("painter"))
+        assert fresh.preferences.get("theme") == "amber"
+
+    def test_unknown_theme_rejected(self, app):
+        s = make_session()
+        s.user = run(_real_user(app, "picker", ["user"]))
+        run(_drive(app, s, "/theme neon"))
+        assert "unknown theme" in text_of(s).lower()
+        assert s.user.preferences.get("theme") != "neon"
+
+    def test_alias_persists_canonical_name(self, app):
+        s = make_session()
+        s.user = run(_real_user(app, "neo", ["user"]))
+        run(_drive(app, s, "/theme hacker"))
+        assert s.user.preferences.get("theme") == "matrix"
+
+    def test_double_slash_still_sets_theme(self, app):
+        """PIM consumes the first `/`; typing `/theme` again must still work."""
+        s = make_session()
+        s.user = run(_real_user(app, "dbl", ["user"]))
+        run(_drive(app, s, "//theme green"))
+        assert s.user.preferences.get("theme") == "green"
+
+    def test_bare_slash_lists_help(self, app):
+        s = make_session()
+        run(_drive(app, s, "/"))
+        out = text_of(s)
+        assert "/theme" in out
+        assert "/ver" in out
+
+
+class TestVerCommand:
+    def test_ver_prints_version(self, app):
+        from core.version import NAME, VERSION
+
+        s = make_session()
+        run(_drive(app, s, "/ver"))
+        out = text_of(s)
+        assert NAME in out
+        assert VERSION in out
+
+    def test_version_alias(self, app):
+        from core.version import VERSION
+
+        s = make_session()
+        run(_drive(app, s, "/version"))
+        assert VERSION in text_of(s)
+
+
 class TestRegistry:
     def test_plugin_can_register_command(self, app):
         from core import slash

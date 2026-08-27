@@ -128,11 +128,12 @@ async def render_social(conversations, session) -> str:
     scroll to the newest activity. Scroll position is stored as lines
     scrolled *up from the bottom* (0 = tail) in ``session._social_scroll_up``.
     """
-    from shared.telnet_protocol import ANSI
+    from core.theme import palette_for
 
     user = getattr(session, "user", None)
     h = int(getattr(session, "terminal_height", 24) or 24)
     is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
+    pal = palette_for(session)
     username = getattr(user, "username", "") or ""
 
     rooms = await social_rooms(conversations, user)
@@ -220,7 +221,8 @@ async def render_social(conversations, session) -> str:
         for m in reversed(window):
             grows = _render_bubbles(
                 [m], PANE_INNER, username=username,
-                new_from_id=new_from, plain=is_plain, compact=True)
+                new_from_id=new_from, plain=is_plain, compact=True,
+                palette=None if is_plain else palette_for(session))
             if used + len(grows) > pane_rows_n:
                 break
             groups.append(grows)
@@ -273,9 +275,14 @@ async def render_social(conversations, session) -> str:
             body = f" {plain_text[:width]} "
             vlen = width + 2
         padded = body + " " * max(0, width + 2 - vlen)
-        if selected and not is_plain:
-            return f"{ANSI.REVERSE}{padded}{ANSI.RESET}"
-        return padded
+        if is_plain:
+            return padded
+        if selected:
+            return f"{pal.tab_fg}{pal.tab_bg}{padded}{pal.reset}"
+        # Bubble rows already carry their own SGR; don't wrap those in text.
+        if "\x1b[" in text:
+            return padded
+        return f"{pal.text}{padded}{pal.reset}"
 
     def side_selected(row_idx: int) -> bool:
         """Sidebar row highlight mirrors the room selection."""
@@ -286,16 +293,18 @@ async def render_social(conversations, session) -> str:
         board_idx = row_idx - 2  # row 1 is the separator
         return board_idx >= 0 and sel == board_idx + 1
 
+    bar = "" if is_plain else pal.muted
+    rst = "" if is_plain else pal.reset
     rows: list[str] = []
     for i in range(content_rows):
         ltxt = side[i] if i < len(side) else ""
         rtxt = pane[i] if i < len(pane) else ""
         rows.append(
-            "│"
+            f"{bar}│{rst}"
             + cell(ltxt, SID_INNER, side_selected(i))
-            + "│"
+            + f"{bar}│{rst}"
             + cell(rtxt, PANE_INNER, False)
-            + "│"
+            + f"{bar}│{rst}"
         )
 
     # -- chrome -----------------------------------------------------------------
@@ -313,7 +322,8 @@ async def render_social(conversations, session) -> str:
         hint_txt = _hint_for_session(session)
     except Exception:
         hint_txt = "up/dn select"
-    top = _build_top(labels, active_idx, hint_txt, is_plain, screen_width=79)
-    bot = "+" + "-" * 77 + "+" if is_plain else f"{ANSI.DIM}└{'─' * 77}┘{ANSI.RESET}"
-    lines = [top] + rows + [bot, SOCIAL_HINT]
+    top = _build_top(labels, active_idx, hint_txt, is_plain, screen_width=79, session=session)
+    bot = "+" + "-" * 77 + "+" if is_plain else f"{pal.muted}└{'─' * 77}┘{pal.reset}"
+    hint = SOCIAL_HINT if is_plain else f"{pal.success}{SOCIAL_HINT}{pal.reset}"
+    lines = [top] + rows + [bot, hint]
     return "\r\n".join(lines)

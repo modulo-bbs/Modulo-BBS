@@ -244,11 +244,13 @@ class BBSAPIHandler(BaseHTTPRequestHandler):
             return self._error("Unauthorized", 401)
         if _bbs is None:
             return self._error("BBS not initialised", 503)
+        from core.version import NAME, VERSION
+
         mgr = _bbs.session_manager
         self._json({
             "status": "running",
-            "name": "Modulo BBS",
-            "version": "0.1-alpha",
+            "name": NAME,
+            "version": VERSION,
             "nodes": {"active": mgr.active_count, "max": mgr.max_nodes},
             "plugins": [p.name for p in _bbs.plugins],
         })

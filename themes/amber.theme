@@ -1,0 +1,10 @@
+# Amber mixed palette. Errors stay red.
+order=20
+accent=14
+success=6
+warning=15
+error=12
+muted=6
+text=15
+prompt=6
+highlight=0,6

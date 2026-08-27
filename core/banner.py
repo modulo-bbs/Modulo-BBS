@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import sys
 
+from core.version import display
 from shared.telnet_protocol import ANSI
 from tools.blockletters import render as block_render
 
@@ -35,12 +36,16 @@ _ANSI_TOKENS["CLEAR"] = ANSI.CLEAR_SCREEN      # screen-clear shortcut
 _ANSI_TOKENS["HOME"] = "\x1b[H"                # cursor home (1;1)
 
 
-def substitute_tokens(text: str, **values: object) -> str:
+def substitute_tokens(text: str, session=None, **values: object) -> str:
     """Replace ``{ANSI_NAME}`` and runtime ``{KEY}`` placeholders in ``text``.
 
-    ANSI codes are substituted first, then the keyword values (e.g. ``NODE``,
-    ``ACTIVE``), so a template can reference either kind.
+    Semantic theme roles first, then literal ANSI names, then keyword
+    values (e.g. ``NODE``, ``ACTIVE``), so a template can reference any.
     """
+    from core.theme import palette_for
+
+    for token, code in palette_for(session).tokens().items():
+        text = text.replace("{" + token + "}", code)
     for token, code in _ANSI_TOKENS.items():
         text = text.replace("{" + token + "}", code)
     for key, value in values.items():
@@ -64,14 +69,17 @@ def banner_lines(session, active_count: int, max_nodes: int) -> list[str]:
     sequencer took over. Lines carry ``\\r\\n`` endings when joined by
     :func:`render_banner`.
     """
+    from core.theme import palette_for
+
     w = min(getattr(session, "terminal_width", 80), 60)
     bar = "=" * w
-    C = ANSI.BRIGHT_CYAN
+    p = palette_for(session)
+    C = p.accent
     B = ANSI.BOLD
-    G = ANSI.BRIGHT_GREEN
-    W = ANSI.BRIGHT_WHITE
-    D = ANSI.BRIGHT_BLACK
-    R = ANSI.RESET
+    G = p.success
+    W = p.text
+    D = p.muted
+    R = p.reset
 
     lines = []
     lines.append(C + B + bar + R)
@@ -86,7 +94,7 @@ def banner_lines(session, active_count: int, max_nodes: int) -> list[str]:
     lines.append("")
     lines.append(W + "  Welcome to Modulo BBS" + R)
     lines.append(D + "  A retro bulletin board system with a modern twist." + R)
-    lines.append(D + "  Version 0.1-alpha | Python " + sys.version.split()[0] + R)
+    lines.append(D + "  Version " + display() + " | Python " + sys.version.split()[0] + R)
     lines.append("")
     lines.append(G + f"  Active nodes: {active_count}/{max_nodes}" + R)
     lines.append("")

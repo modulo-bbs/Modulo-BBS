@@ -26,6 +26,7 @@ from plugins.mainmenu.tabs import load_tabs, visible_tabs
 from shared.telnet_protocol import ANSI
 
 from core import runner
+from core.theme import palette_for
 
 
 def _collapse_overlay_spacing(text: str) -> str:
@@ -144,7 +145,7 @@ def _flow_cells(labels, hint, active_idx):
     return widths, active_x, widths[active_idx]
 
 
-def _build_top(labels, active_idx, hint, is_plain, screen_width=79):
+def _build_top(labels, active_idx, hint, is_plain, screen_width=79, session=None):
     """Funnel/head row: rule whose '|' sits directly below the active tab's
     opening '|' and whose backslash closes the stop after the hint —
     everything below belongs to this heading. Slides with the active tab.
@@ -157,10 +158,68 @@ def _build_top(labels, active_idx, hint, is_plain, screen_width=79):
     row = (left + head + right)[:screen_width].ljust(screen_width, fill)
     if is_plain:
         return row
+    p = palette_for(session)
     hl = len(head)
-    return (f"{ANSI.DIM}{row[:x]}{ANSI.RESET}"
-            f"{row[x:x+hl]}"
-            f"{ANSI.DIM}{row[x+hl:]}{ANSI.RESET}")
+    return (f"{p.muted}{row[:x]}{p.reset}"
+            f"{p.text}{row[x:x+hl]}{p.reset}"
+            f"{p.muted}{row[x+hl:]}{p.reset}")
+
+
+def _list_row(disp: str, selected: bool, is_plain: bool, pal) -> str:
+    """One PIM list row: phosphor text, selection uses tab colours (not REVERSE)."""
+    inner = disp[:74].ljust(74)
+    if is_plain:
+        mark = "> " if selected else "  "
+        return f"│{mark}{inner} │"
+    bar = pal.muted
+    rst = pal.reset
+    if selected:
+        return f"{bar}│{rst}{pal.tab_fg}{pal.tab_bg} {inner} {rst}{bar}│{rst}"
+    return f"{bar}│{rst}{pal.text}  {inner} {rst}{bar}│{rst}"
+
+
+def _overlay_geom(session) -> tuple[int, int, int, int, int]:
+    """Notepad-style overlay: top, left, interior width, interior rows, text cols."""
+    h = int(getattr(session, "terminal_height", 24) or 24)
+    L, R = 1, 79
+    top, bot = 2, max(4, h - 3)
+    wid = R - L - 1
+    interior = bot - top - 1
+    return top, L, wid, interior, wid - 1
+
+
+def _paint_overlay(session, rows: list[str], hint: str, pal) -> str:
+    """CUP-positioned bordered box. *rows* are already inner-width (ANSI ok)."""
+    from shared.codecs import _ANSI_RE
+
+    top, L, wid, interior, inner_w = _overlay_geom(session)
+    is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
+    G = "" if is_plain else pal.success
+    RST = "" if is_plain else pal.reset
+    if is_plain:
+        tl, tr, bl, br, hb, vb = "+", "+", "+", "+", "-", "|"
+    else:
+        tl, tr, bl, br, hb, vb = "┌", "┐", "└", "┘", "─", "│"
+
+    clipped = list(rows)
+    if len(clipped) > interior:
+        clipped = clipped[: interior - 1] + ["…"]
+
+    parts = [f"\x1b[{top};{L}H", f"{G}{tl}{hb * wid}{tr}{RST}"]
+    for i in range(interior):
+        cell = clipped[i] if i < len(clipped) else ""
+        gutter = " " + cell
+        vis = len(_ANSI_RE.sub("", gutter))
+        if vis < wid:
+            gutter = gutter + " " * (wid - vis)
+        parts.append("\r\n" + f"{G}{vb}{RST}" + gutter + f"{G}{vb}{RST}")
+    hint = hint or ""
+    pad_l = max(0, (wid - len(hint)) // 2)
+    pad_r = max(0, wid - pad_l - len(hint))
+    parts.append(
+        "\r\n" + f"{G}{bl}{hb * pad_l}{RST}{hint}{G}{hb * pad_r}{br}{RST}"
+    )
+    return "".join(parts)
 
 
 # Session state (guarded so this module imports standalone too).
@@ -209,16 +268,14 @@ class MainmenuPlugin(Plugin):
             if key is None:
                 break
             if key == "/":
-                # Slash command: collect the rest of the line and hand it to
-                # the shared dispatcher (/screen, /help, …). The "/" itself
-                # was already echoed by the input layer -- do NOT echo again.
-                from core.slash import handle_slash
-
+                # The `>` is a hotkey prompt, not a shell. `/` switches that
+                # one key into a line read: type `theme` or `theme amber` and
+                # Enter. Result paints in an overlay (same geometry as the
+                # Social notepad) so the PIM does not scroll; any key dismisses.
                 rest = await runner.read_command(self.bbs, session)
                 if rest is None:
                     break
-                line = ("/" + rest.strip("\r\n")).strip()
-                await handle_slash(self.bbs, session, line)
+                await self._dispatch_slash(session, rest)
                 continue
             # PIM tab/pane navigation (build-plan § Step 8)
             if self._is_pim(session) and await self._handle_pim_key(session, key):
@@ -240,10 +297,131 @@ class MainmenuPlugin(Plugin):
     def _active_tab_id(self, session) -> str:
         return getattr(session, "_pim_active_tab", None) or "dashboard"
 
+    async def _run_slash(self, session, line: str) -> str:
+        """Dispatch ``line`` capturing ``bbs.send`` so callers can overlay it."""
+        from core.slash import handle_slash
+
+        chunks: list[str] = []
+
+        class _Capture:
+            async def send(_self, _session, text):
+                chunks.append(text or "")
+
+            def __getattr__(_self, name):
+                return getattr(self.bbs, name)
+
+        await handle_slash(_Capture(), session, line)
+        return "".join(chunks)
+
+    async def _dispatch_slash(self, session, rest: str) -> None:
+        """Run a `/command` typed after the `/` hotkey.
+
+        Bare ``theme`` opens an up/down picker in the overlay. Other commands
+        (including ``theme amber``) capture output into an info modal.
+        """
+        rest = (rest or "").strip("\r\n").strip()
+        line = rest if rest.startswith("/") else "/" + rest
+        bits = line.lstrip("/").split(None, 1)
+        word = (bits[0] if bits else "").lower()
+        arg = bits[1].strip() if len(bits) > 1 else ""
+        if word == "theme" and not arg:
+            await self._theme_picker(session)
+            return
+        body = await self._run_slash(session, line)
+        await self._overlay_modal(session, body)
+
+    async def _overlay_modal(self, session, body: str) -> None:
+        """Bordered info box over the current screen; any key dismisses.
+
+        Geometry matches the Social Ctrl-E notepad so the PIM chrome stays
+        put (CUP to the box, no leading CRLF that would scroll the display).
+        """
+        from shared.codecs import _ANSI_RE
+        from shared.textwrap import wrap
+
+        _top, _L, _wid, interior, inner_w = _overlay_geom(session)
+        pal = palette_for(session)
+        text = (body or "").replace("\r\n", "\n").replace("\r", "\n")
+        raw = [ln.rstrip() for ln in text.split("\n")]
+        while raw and not raw[0].strip():
+            raw.pop(0)
+        while raw and not raw[-1].strip():
+            raw.pop()
+
+        lines: list[str] = []
+        for ln in raw:
+            plain = _ANSI_RE.sub("", ln)
+            if len(plain) <= inner_w:
+                lines.append(ln)
+            else:
+                lines.extend(wrap(plain, inner_w))
+        if len(lines) > interior:
+            lines = lines[: interior - 1] + ["…"]
+        await self.bbs.send(
+            session, _paint_overlay(session, lines, " any key dismiss ", pal)
+        )
+        await runner.read_key(self.bbs, session)
+
+    async def _theme_picker(self, session) -> None:
+        """Up/down theme list in the overlay; Enter applies, ESC cancels.
+
+        The box itself uses the highlighted palette so the choice is visible
+        before it is saved. Home chrome redraws in the new colours after apply.
+        """
+        from core.theme import load_palette, theme_name_for, theme_names
+
+        names = theme_names()
+        saved = theme_name_for(session)
+        idx = names.index(saved) if saved in names else 0
+        is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
+        _top, _L, _wid, _interior, inner_w = _overlay_geom(session)
+
+        def _rows() -> tuple[list[str], object]:
+            pal = load_palette(names[idx])
+            heading = "Theme"
+            if not is_plain:
+                heading = f"{pal.accent}{heading}{pal.reset}"
+            rows = [heading, ""]
+            for i, name in enumerate(names):
+                mark = " *" if name == saved else ""
+                if is_plain:
+                    prefix = "> " if i == idx else "  "
+                    rows.append(f"{prefix}{name}{mark}"[:inner_w].ljust(inner_w))
+                    continue
+                label = f"{name}{mark}"[:inner_w].ljust(inner_w)
+                if i == idx:
+                    rows.append(f"{pal.tab_fg}{pal.tab_bg}{label}{pal.reset}")
+                else:
+                    rows.append(f"{pal.text}{label}{pal.reset}")
+            return rows, pal
+
+        while getattr(session, "is_active", True):
+            rows, pal = _rows()
+            await self.bbs.send(
+                session,
+                _paint_overlay(
+                    session, rows, " arrows select  Enter apply  ESC cancel ", pal
+                ),
+            )
+            key = await runner.read_key(self.bbs, session)
+            if key is None:
+                return
+            if key in ("UP", "K"):
+                idx = max(0, idx - 1)
+            elif key in ("DOWN", "J"):
+                idx = min(len(names) - 1, idx + 1)
+            elif key == "ENTER":
+                chosen = names[idx]
+                await self._run_slash(session, f"/theme {chosen}")
+                return
+            elif key in ("ESC", "Q"):
+                return
+
     def _render_tabs(self, session, tabs: list[dict], active_id: str) -> str:
         """Tab row as '| label | ' cells (same _flow_cells math as the funnel
         row, so alignment holds by construction, not by coordinates)."""
         is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
+        p = palette_for(session)
         labels = [x["label"] for x in tabs]
         active_idx = max(0, next((i for i, x in enumerate(tabs) if x["id"] == active_id), 0))
         hint = _hint_for_session(session)
@@ -255,9 +433,9 @@ class MainmenuPlugin(Plugin):
             if is_plain:
                 parts.append(cell.upper() if i == active_idx else cell)
             elif i == active_idx:
-                parts.append(f"{ANSI.BRIGHT_WHITE}{ANSI.BG_BLUE}{cell}{ANSI.RESET}")
+                parts.append(f"{p.tab_fg}{p.tab_bg}{cell}{p.reset}")
             else:
-                parts.append(f"{ANSI.DIM}{cell}{ANSI.RESET}")
+                parts.append(f"{p.muted}{cell}{p.reset}")
         row = "".join(f"| {c} | " for c in parts)
         vis = 5 * len(parts) + sum(widths)
         return row + " " * max(0, 79 - vis)
@@ -371,8 +549,9 @@ class MainmenuPlugin(Plugin):
             _aid = self._active_tab_id(session)
             active_idx = max(0, next((i for i, x in enumerate(tabs_for_top) if x["id"] == _aid), 0))
             hint = _hint_for_session(session)
-            top = _build_top(labels, active_idx, hint, is_plain, screen_width=79)
-            bot = "+" + "-" * 77 + "+" if is_plain else f"{ANSI.DIM}└{'─' * 77}┘{ANSI.RESET}"
+            top = _build_top(labels, active_idx, hint, is_plain, screen_width=79, session=session)
+            p = palette_for(session)
+            bot = "+" + "-" * 77 + "+" if is_plain else f"{p.muted}└{'─' * 77}┘{p.reset}"
             lines = [top]
             # highlight the selected digest row
             selected = getattr(session, "_pim_selected", 0)
@@ -386,18 +565,11 @@ class MainmenuPlugin(Plugin):
                     pass
             for idx, (text, _) in enumerate(digests):
                 is_sel = idx == selected
-                # ensure digest fits 74 inside box
                 disp = text[:74].ljust(74)
-                if is_sel:
-                    if is_plain:
-                        row = f"│> {disp} │"
-                    else:
-                        row = f"│{ANSI.REVERSE} {disp} {ANSI.RESET} │"
-                else:
-                    row = f"│  {disp} │"
-                lines.append(row)
+                lines.append(_list_row(disp, is_sel, is_plain, p))
             lines.append(bot)
-            lines.append("  Arrows/WASD or 1/2/3 to switch tabs, Enter to open, Q to disconnect")
+            hint_line = "  Arrows/WASD or 1/2/3 to switch tabs, Enter to open, Q to disconnect"
+            lines.append(hint_line if is_plain else f"{p.success}{hint_line}{p.reset}")
             # stash target map for Enter handler
             try:
                 session._pim_dashboard_targets = [t for _, t in digests]
@@ -427,12 +599,14 @@ class MainmenuPlugin(Plugin):
         _aid = self._active_tab_id(session)
         active_idx = max(0, next((i for i, x in enumerate(tabs_for_top) if x["id"] == _aid), 0))
         hint = _hint_for_session(session)
-        top = _build_top(labels, active_idx, hint, is_plain, screen_width=79)
-        bot = "+" + "-" * 77 + "+" if is_plain else f"{ANSI.DIM}└{'─' * 77}┘{ANSI.RESET}"
+        top = _build_top(labels, active_idx, hint, is_plain, screen_width=79, session=session)
+        p = palette_for(session)
+        bot = "+" + "-" * 77 + "+" if is_plain else f"{p.muted}└{'─' * 77}┘{p.reset}"
         lines = [top]
         if not convs:
             label = tab.get('label','conversations').lower()
-            lines.append(f"│  (no {label} yet)".ljust(77) + "│")
+            empty = f"(no {label} yet)"
+            lines.append(_list_row(empty.ljust(74), False, is_plain, p))
         else:
             selected = getattr(session, "_pim_selected", 0)
             if selected < 0:
@@ -462,16 +636,10 @@ class MainmenuPlugin(Plugin):
                 except Exception:
                     preview = title
                 is_sel = idx == selected
-                if is_sel:
-                    if is_plain:
-                        row = f"│> {preview[:74].ljust(74)} │"
-                    else:
-                        row = f"│{ANSI.REVERSE} {preview[:74].ljust(74)} {ANSI.RESET} │"
-                else:
-                    row = f"│  {preview[:74].ljust(74)} │"
-                lines.append(row)
+                lines.append(_list_row(preview[:74].ljust(74), is_sel, is_plain, p))
         lines.append(bot)
-        lines.append("  Arrows/WASD or 1/2/3 to switch tabs, Enter to open, Q to disconnect")
+        hint_line = "  Arrows/WASD or 1/2/3 to switch tabs, Enter to open, Q to disconnect"
+        lines.append(hint_line if is_plain else f"{p.success}{hint_line}{p.reset}")
         return "\r\n".join(lines)
 
     async def _handle_pim_key(self, session, key: str) -> bool:
@@ -692,8 +860,9 @@ class MainmenuPlugin(Plugin):
         h = int(getattr(session, "terminal_height", 24) or 24)
         w = 79
         is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
-        G = "" if is_plain else ANSI.BRIGHT_GREEN
-        R = "" if is_plain else ANSI.RESET
+        p = palette_for(session)
+        G = "" if is_plain else p.prompt
+        R = "" if is_plain else p.reset
 
         def input_rows(d: str) -> list[str]:
             """Physical rows of the input area: '> ' first, wrap at width.
@@ -748,7 +917,8 @@ class MainmenuPlugin(Plugin):
                     for m in reversed(window):
                         grows = render_bubbles(
                             [m], w, username=uname,
-                            new_from_id=baseline + 1, plain=is_plain)
+                            new_from_id=baseline + 1, plain=is_plain,
+                            palette=None if is_plain else p)
                         if used + len(grows) > budget:
                             break
                         groups.append(grows)
@@ -921,8 +1091,9 @@ class MainmenuPlugin(Plugin):
         H = bot - top - 1                 # interior rows — hard capacity
         inner_w = Wid - 1                 # text column minus gutter space
         is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
-        G = "" if is_plain else ANSI.BRIGHT_GREEN
-        RST = "" if is_plain else ANSI.RESET
+        pal = palette_for(session)
+        G = "" if is_plain else pal.success
+        RST = "" if is_plain else pal.reset
         if is_plain:
             tl, tr, bl, br, hb, vb = "+", "+", "+", "+", "-", "|"
         else:
@@ -1081,7 +1252,11 @@ class MainmenuPlugin(Plugin):
                     await self.bbs.send(session, line[:79] + "\r\n")
             await self.bbs.send(session, "─" * 79 + "\r\n")
             await self.bbs.send(session, " R)reply  D)delete  F)find  N)next P)prev  ESC/Q back\r\n")
-            await self.bbs.send(session, f"\x1b[{getattr(session, 'terminal_height', 24)};1H\x1b[2K\x1b[92m  >\x1b[0m")
+            p = palette_for(session)
+            await self.bbs.send(
+                session,
+                f"\x1b[{getattr(session, 'terminal_height', 24)};1H\x1b[2K{p.prompt}  >{p.reset}",
+            )
             key = await runner.read_key(self.bbs, session)
             if key is None or key == "Q" or key == "ESC":
                 return
@@ -1237,9 +1412,10 @@ class MainmenuPlugin(Plugin):
             screen = self.bbs.screens.render(session, self.name, "main")
             await self.bbs.send(session, screen)
 
-        # Pin the green ``>`` prompt on the very last terminal line.
-        G = ANSI.BRIGHT_GREEN
-        R = ANSI.RESET
+        # Pin the themed ``>`` prompt on the very last terminal line.
+        p = palette_for(session)
+        G = p.prompt
+        R = p.reset
         await self.bbs.send(session, f"\x1b[{h};1H")   # last row
         await self.bbs.send(session, "\x1b[2K")        # clear that row
         await self.bbs.send(session, f"{G}  >{R}")
@@ -1282,10 +1458,11 @@ class MainmenuPlugin(Plugin):
         """
         w = min(80, 60)
         bar = "=" * w
-        C = ANSI.BRIGHT_CYAN
+        p = palette_for(session)
+        C = p.accent
         B = ANSI.BOLD
-        W = ANSI.BRIGHT_WHITE
-        R = ANSI.RESET
+        W = p.text
+        R = p.reset
 
         user = getattr(session, "user", None) if session is not None else None
         lines = [C + B + bar + R, C + B + "  Main Menu" + R, C + B + bar + R]
@@ -1322,10 +1499,12 @@ class MainmenuPlugin(Plugin):
     def _system_info(self, session) -> str:
         """Static system information block."""
         mgr = self.bbs.session_manager
+        from core.version import NAME, display
+
         return (
             "\r\n--- System Information ---\r\n"
-            f"  Name:     Modulo BBS\r\n"
-            f"  Version:  0.1-alpha\r\n"
+            f"  Name:     {NAME}\r\n"
+            f"  Version:  {display()}\r\n"
             f"  Runtime:  Python {sys.version.split()[0]}\r\n"
             f"  Nodes:    {mgr.active_count}/{mgr.max_nodes}\r\n"
             f"  Session:  {session.session_id} @ Node {session.node_id}\r\n"

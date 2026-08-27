@@ -10,6 +10,18 @@
 | 1 | One-API + screens + tabbed PIM home | **COMPLETE** (Steps 1–11 below; PIM home shipped through `32ca439`, 2026-08-25) |
 | 2 | Boards → Social unification (`.hermes/plans/2026-08-25_150714-boards-unification.md`) | **COMPLETE** — A1–A4 + B0–B6 landed 2026-08-25 (`4afe66c`…`9dda401`); B7 Syncterm pass pending Dave. Tab row: Dashboard \| Social \| Files \| Bulletins; DMs pinned inside Social (OQ2). **B8 divergence (same evening, per Dave):** Telegram-style chat replaces the classic reader — type-at-prompt posting, tail-anchored history, 1s polling with NEW badges, compact bubble previews (`d63f8bf`→). **B8 part 4:** Ctrl-Enter (LF) multi-line compose — draft box word-wraps and grows upward over bubbles, Enter posts with line breaks intact. **B8 parts 5–7:** Ctrl-E overlay notepad editor (arrows navigate anywhere, hard box limit, draft carries both ways); tall chat drafts collapse to a `[N lines]` preview; SyncTERM key truth hex-captured — Shift-Enter is byte-identical to Enter, Ctrl-Enter sends LF. **Overlay keys (Dave, 2026-08-27):** Ctrl-S save/send, ESC cancel (restore chat-box draft), Ctrl-E keep overlay text and return to chat. Overlay save collapses blank lines to single spacing. Social pane: no painted `+ new thread` row (`N` only; empty title aborts); pane leaves rows for the tab bar + prompt on 80×24. |
 
+### Later / accessories (Dave, 2026-08-27)
+
+Not core. Last things, if ever:
+
+- **Screens editor** — in-board (or sidecar) editor for `.ans`/`.asc`/`.txt`. Reskin contract stays drop-a-file on disk (`docs/screens.md`). An editor is an accessory on top of that, not a new screen pipeline.
+
+**Two audiences (same day):** a sysop who edits those files themselves, and a sysop who directs an agent to edit them. Same contract. Agent-facing instructions stay in `.cursor/rules/` so human docs stay human.
+
+**Usability (same day):** first start must feel like a board, not a toolkit. Dave's north star is TriBBS (Mark Goodwin) — approachable like Apple's machines were against the PC clones of the era. Defaults over knobs; power stays in drop-in files.
+
+**Names (same day):** call things what they are. Directory name = contents; filename = job. A sysop should bring a basic board up from `README.md` without reading the rest. Docs stay; they are not the on-ramp.
+
 Historical Tasks 1–6 are retained below as the record of the foundation build. Current roadmap is Phase 1.
 
 ---

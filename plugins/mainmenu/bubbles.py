@@ -2,14 +2,16 @@
 
 Pure function: messages in, display rows out. CP437-safe box drawing,
 every emitted row exactly ``width`` visible columns, ANSI-colored unless
-plain. Own messages align right in cyan, others align left in green;
-messages that arrived after the viewer entered the room carry a NEW tag
-(yellow on ANSI).
+plain. Own messages align right in the theme accent, others align left in
+success; messages that arrived after the viewer entered the room carry a
+NEW tag (warning colour on ANSI). Pass ``palette=`` to recolor; default
+is the classic cyan/green look so tests stay stable.
 """
 from __future__ import annotations
 
 import re
 
+from core.theme import Palette, load_palette
 from shared.textwrap import wrap
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -27,6 +29,7 @@ def render_bubbles(
     new_from_id: int = 0,
     plain: bool = False,
     compact: bool = False,
+    palette: Palette | None = None,
 ) -> list[str]:
     """Render *msgs* (oldest first) as stacked chat bubbles.
 
@@ -37,15 +40,17 @@ def render_bubbles(
     if width < 9:
         width = 9
 
+    pal = palette or load_palette("classic")
+
     if plain:
         TL, TR, BL, BR, H, V = "+", "+", "+", "+", "-", "|"
     else:
         TL, TR, BL, BR, H, V = "\u250c", "\u2510", "\u2514", "\u2518", "\u2500", "\u2502"
 
-    C_ME = "" if plain else "\x1b[96m"      # bright cyan
-    C_OTHER = "" if plain else "\x1b[92m"   # bright green
-    C_NEW = "" if plain else "\x1b[93m"     # bright yellow
-    RST = "" if plain else "\x1b[0m"
+    C_ME = "" if plain else pal.accent
+    C_OTHER = "" if plain else pal.success
+    C_NEW = "" if plain else pal.warning
+    RST = "" if plain else pal.reset
 
     rows: list[str] = []
     for m in msgs:

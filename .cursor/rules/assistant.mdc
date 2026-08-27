@@ -1,0 +1,42 @@
+---
+description: For AI assistants only — how to modify this BBS and how to announce a launch. Not sysop documentation.
+alwaysApply: true
+---
+
+# For AI assistants (not for human sysops)
+
+This file is Cursor/agent guidance. Do not copy it into sysop-facing docs
+(`docs/sysop-guide.md`, `docs/themes.md`, `docs/screens.md`, plugin READMEs).
+
+## Two audiences, one contract
+
+Sysops either edit the board themselves or **direct you** to edit it.
+The second path is first-class. Prefer the same drop-a-file contracts a
+human would use (`themes/*.theme`, `plugins/<name>/screens/`, `screens/`).
+Do not invent a Python palette, a new pipeline, or an in-board editor
+when a file will do.
+
+First start should feel like a working BBS (TriBBS-simple), not a tour of
+every knob. Change the one file they asked for. Do not dump architecture
+or a 12-step config unless they asked.
+
+Call things what they are. A new directory or file should be obvious from
+its name (`server/`, `themes/`, `run_server.py`) — not "gateway node".
+If a sysop cannot start a basic board from `README.md`, the on-ramp is
+wrong; do not send them to architecture first.
+
+## Launching the server
+
+When you start or restart `run_server.py`, tell the user the **version
+and build** from `core.version.display()` (for example `0.2.0 (8eae965)`),
+plus the ports. Same line as `/ver`.
+
+After the listener is up:
+
+```bash
+venv/bin/python -c "from core.version import display; print(display())"
+```
+
+Bind on the host (not the Cursor sandbox) or SyncTERM will not see
+127.0.0.1. Do not use `pkill`. `kill -TERM` the python PID that owns
+6400/6422.

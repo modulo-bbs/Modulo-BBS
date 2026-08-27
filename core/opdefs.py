@@ -48,11 +48,13 @@ def _split_groups(raw: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def _health(bbs, user, params):
+    from core.version import NAME, VERSION
+
     mgr = bbs.session_manager
     return {
         "status": "running",
-        "name": "Modulo BBS",
-        "version": "0.1-alpha",
+        "name": NAME,
+        "version": VERSION,
         "nodes": {"active": mgr.active_count, "max": mgr.max_nodes},
         "plugins": [p.name for p in bbs.plugins],
     }

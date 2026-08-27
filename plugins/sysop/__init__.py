@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 
 from core.ops import PermissionDeniedError, ValidationError, registry
+from core.theme import palette_for
 from plugins.base import Plugin
 from shared.telnet_protocol import ANSI
 
@@ -130,7 +131,8 @@ class SysopPlugin(Plugin):
 
     def _render(self, session) -> str:
         w = min(getattr(session, "terminal_width", 80), 60)
-        C, B, W, R = ANSI.BRIGHT_CYAN, ANSI.BOLD, ANSI.BRIGHT_WHITE, ANSI.RESET
+        p = palette_for(session)
+        C, B, W, R = p.accent, ANSI.BOLD, p.text, p.reset
         lines = [C + B + "=" * w + R, C + B + "  SysOp Menu" + R, C + B + "=" * w + R, ""]
 
         letter = 0
@@ -244,7 +246,8 @@ class SysopPlugin(Plugin):
 
     async def _show_users_table(self, session, result):
         """Human table for users.list with pagination (N=next, P=prev, Q=quit)."""
-        W, C, R = ANSI.BRIGHT_WHITE, ANSI.BRIGHT_CYAN, ANSI.RESET
+        p = palette_for(session)
+        W, C, R = p.text, p.accent, p.reset
         page = result["page"]
         pages = result["pages"]
         total = result["total"]

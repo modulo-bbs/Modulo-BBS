@@ -1,17 +1,17 @@
-{CLEAR}{HOME}{BRIGHT_CYAN}{BOLD}============================================================{RESET}
-{BRIGHT_CYAN}{BOLD}#   #  ###  ####  #   # #      ###{RESET}
-{BRIGHT_CYAN}{BOLD}## ## #   # #   # #   # #     #   #{RESET}
-{BRIGHT_CYAN}{BOLD}# # # #   # #   # #   # #     #   #{RESET}
-{BRIGHT_CYAN}{BOLD}# # # #   # #   # #   # #     #   #{RESET}
-{BRIGHT_CYAN}{BOLD}#   # #   # #   # #   # #     #   #{RESET}
-{BRIGHT_CYAN}{BOLD}#   # #   # #   # #   # #     #   #{RESET}
-{BRIGHT_CYAN}{BOLD}#   #  ###  ####   ###  #####  ###{RESET}
-{BRIGHT_CYAN}{BOLD}============================================================{RESET}
+{CLEAR}{HOME}{ACCENT}{BOLD}============================================================{RESET}
+{ACCENT}{BOLD}#   #  ###  ####  #   # #      ###{RESET}
+{ACCENT}{BOLD}## ## #   # #   # #   # #     #   #{RESET}
+{ACCENT}{BOLD}# # # #   # #   # #   # #     #   #{RESET}
+{ACCENT}{BOLD}# # # #   # #   # #   # #     #   #{RESET}
+{ACCENT}{BOLD}#   # #   # #   # #   # #     #   #{RESET}
+{ACCENT}{BOLD}#   # #   # #   # #   # #     #   #{RESET}
+{ACCENT}{BOLD}#   #  ###  ####   ###  #####  ###{RESET}
+{ACCENT}{BOLD}============================================================{RESET}
 
-{BRIGHT_BLACK}  Node {NODE} | {TTERM} ({TW}x{TH}){RESET}
+{MUTED}  Node {NODE} | {TTERM} ({TW}x{TH}){RESET}
 
-{BRIGHT_WHITE}  Welcome to Modulo BBS{RESET}
-{BRIGHT_BLACK}  A retro bulletin board system with a modern twist.{RESET}
-{BRIGHT_BLACK}  Version 0.1-alpha | Python {PYTHON}{RESET}
+{TEXT}  Welcome to Modulo BBS{RESET}
+{MUTED}  A retro bulletin board system with a modern twist.{RESET}
+{MUTED}  Version {VERSION} | Python {PYTHON}{RESET}
 
-{BRIGHT_GREEN}  Active nodes: {ACTIVE}/{MAXNODES}{RESET}
+{SUCCESS}  Active nodes: {ACTIVE}/{MAXNODES}{RESET}

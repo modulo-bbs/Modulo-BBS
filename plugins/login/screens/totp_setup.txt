@@ -1,14 +1,14 @@
-{CLEAR}{HOME}{BRIGHT_CYAN}{BOLD}============================================================{RESET}
-{BRIGHT_CYAN}{BOLD}              MODULO BBS -- TOTP SETUP{RESET}
-{BRIGHT_CYAN}{BOLD}============================================================{RESET}
+{CLEAR}{HOME}{ACCENT}{BOLD}============================================================{RESET}
+{ACCENT}{BOLD}              MODULO BBS -- TOTP SETUP{RESET}
+{ACCENT}{BOLD}============================================================{RESET}
 
-{BRIGHT_GREEN}Two-factor authentication setup.{RESET}
+{SUCCESS}Two-factor authentication setup.{RESET}
 
-{BRIGHT_WHITE}Add this secret to your authenticator app:{RESET}
-{BRIGHT_YELLOW}{SECRET}{RESET}
+{TEXT}Add this secret to your authenticator app:{RESET}
+{WARNING}{SECRET}{RESET}
 
-{BRIGHT_WHITE}Or scan this URI:{RESET}
-{BRIGHT_YELLOW}otpauth://totp/ModuloBBS:{USERNAME}?secret={SECRET}{RESET}
+{TEXT}Or scan this URI:{RESET}
+{WARNING}otpauth://totp/ModuloBBS:{USERNAME}?secret={SECRET}{RESET}
 
-{BRIGHT_BLACK}------------------------------------------------------------{RESET}
-{BRIGHT_CYAN}Enter verification code: {RESET}
+{MUTED}------------------------------------------------------------{RESET}
+{ACCENT}Enter verification code: {RESET}

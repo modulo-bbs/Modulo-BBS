@@ -64,8 +64,19 @@ def test_new_badge_only_for_others_after_baseline():
 def test_colors_cyan_me_green_other_yellow_new():
     out = render_bubbles(_msgs(), 60, username="dave")
     joined = "\n".join(out)
-    assert "\x1b[96m" in joined   # own cyan
-    assert "\x1b[92m" in joined   # other green
+    assert "\x1b[96m" in joined   # own cyan (classic accent)
+    assert "\x1b[92m" in joined   # other green (classic success)
+
+
+def test_palette_recolors_me_and_other():
+    from core.theme import load_palette
+
+    pal = load_palette("amber")
+    out = render_bubbles(_msgs(), 60, username="dave", palette=pal)
+    joined = "\n".join(out)
+    assert pal.accent in joined
+    assert pal.success in joined
+    assert "\x1b[96m" not in joined  # classic cyan gone
 
 
 def test_plain_fallback_ascii_only():

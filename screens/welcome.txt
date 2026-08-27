@@ -1,8 +1,8 @@
-{CLEAR}{HOME}{BRIGHT_CYAN}{BOLD}============================================================{RESET}
-{BRIGHT_CYAN}{BOLD}               WELCOME TO MODULO BBS{RESET}
-{BRIGHT_CYAN}{BOLD}============================================================{RESET}
+{CLEAR}{HOME}{ACCENT}{BOLD}============================================================{RESET}
+{ACCENT}{BOLD}               WELCOME TO MODULO BBS{RESET}
+{ACCENT}{BOLD}============================================================{RESET}
 
-{BRIGHT_WHITE}Welcome aboard, {NAME}!{RESET}
-{BRIGHT_BLACK}You are now connected.{RESET}
+{TEXT}Welcome aboard, {NAME}!{RESET}
+{MUTED}You are now connected.{RESET}
 
-{BRIGHT_YELLOW}Press Q at any menu to disconnect.{RESET}
+{WARNING}Press Q at any menu to disconnect.{RESET}

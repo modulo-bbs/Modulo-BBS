@@ -1,0 +1,17 @@
+# Classic cyan/green — the original Modulo look.
+# Colours are DOS numbers: fg 0-15, optional bg 0-7.
+#   0 black   1 blue    2 green   3 cyan
+#   4 red     5 magenta 6 brown   7 light gray
+#   8 dark gray  9 light blue  10 light green  11 light cyan
+#  12 light red  13 light magenta  14 yellow  15 white
+# Missing keys use these same defaults. Any extra key (banner=14) is
+# picked up as a {BANNER} screen token.
+order=10
+accent=11
+success=10
+warning=14
+error=12
+muted=8
+text=15
+prompt=10
+highlight=15,1

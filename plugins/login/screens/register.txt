@@ -1,9 +1,9 @@
-{CLEAR}{HOME}{BRIGHT_CYAN}{BOLD}============================================================{RESET}
-{BRIGHT_CYAN}{BOLD}              MODULO BBS -- REGISTER{RESET}
-{BRIGHT_CYAN}{BOLD}============================================================{RESET}
+{CLEAR}{HOME}{ACCENT}{BOLD}============================================================{RESET}
+{ACCENT}{BOLD}              MODULO BBS -- REGISTER{RESET}
+{ACCENT}{BOLD}============================================================{RESET}
 
-{BRIGHT_GREEN}Create a new account. Just pick a username and password.{RESET}
-{BRIGHT_BLACK}(You can add a display name, location and more later
+{SUCCESS}Create a new account. Just pick a username and password.{RESET}
+{MUTED}(You can add a display name, location and more later
  in User Settings.){RESET}
 
-{BRIGHT_BLACK}------------------------------------------------------------{RESET}
+{MUTED}------------------------------------------------------------{RESET}

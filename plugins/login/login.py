@@ -26,7 +26,6 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from shared.telnet_protocol import ANSI
 from core.screens import ANSI_TOKENS
 
 logger = logging.getLogger("modulo.plugins.login")
@@ -64,16 +63,18 @@ class ScreenLoader:
         self.bbs = bbs
         self.screens_dir = Path(screens_dir) if screens_dir else SCREENS_DIR
 
-    def render(self, name: str, **kwargs: object) -> str:
+    def render(self, name: str, session=None, **kwargs: object) -> str:
         svc = getattr(self.bbs, "screens", None) if self.bbs else None
         if svc is not None and self.screens_dir == SCREENS_DIR:
             stem = name.rsplit(".", 1)[0]
-            return svc.render(None, "login", stem, **kwargs)
+            return svc.render(session, "login", stem, **kwargs)
         # Fallback for custom dirs (tests): direct read + ANSI substitution.
         from core.banner import substitute_tokens
 
         raw = (self.screens_dir / name).read_bytes()
-        return substitute_tokens(raw.decode("utf-8", errors="replace"), **kwargs)
+        return substitute_tokens(
+            raw.decode("utf-8", errors="replace"), session=session, **kwargs
+        )
 
     def load(self, name: str) -> str:
         return self.render(name)
@@ -141,9 +142,10 @@ class Terminal:
         terminal before anyone can read it (Dave hit this 2026-08-25 —
         "registration silently bounces back to Username").
         """
-        from shared.telnet_protocol import ANSI
+        from core.theme import palette_for
 
-        await self.send(f"{ANSI.DIM}{msg}{ANSI.RESET}\r\n")
+        pal = palette_for(self.session)
+        await self.send(f"{pal.muted}{msg}{pal.reset}\r\n")
         from core import runner
 
         await runner.read_key(self.bbs, self.session)
@@ -167,7 +169,7 @@ class LoginFlow:
         """
         tty = Terminal(self.bbs, session)
         while getattr(session, "is_active", True):
-            await tty.send(self.screens.render("login.txt"))
+            await tty.send(self.screens.render("login.txt", session))
             answer = (await tty.read_line("Login: ")).strip()
             if not answer:
                 return False                       # EOF / disconnect
@@ -191,8 +193,11 @@ class LoginFlow:
 
     async def _authenticate(self, session, tty: Terminal, username: str) -> bool:
         """Prompt for the password and validate credentials + optional TOTP."""
+        from core.theme import palette_for
+
+        p = palette_for(session)
         password = await tty.read_line(
-            f"{ANSI.CYAN}Password: {ANSI.RESET}", secret=True
+            f"{p.accent}Password: {p.reset}", secret=True
         )
 
         user = await self.bbs.users.get(username)
@@ -202,7 +207,7 @@ class LoginFlow:
                 "reason": "Invalid username or password",
             })
             await tty.send(
-                f"{ANSI.BRIGHT_RED}Invalid username or password.{ANSI.RESET}\r\n"
+                f"{p.error}Invalid username or password.{p.reset}\r\n"
             )
             await tty.pause()
             return False
@@ -217,7 +222,7 @@ class LoginFlow:
                     "reason": "Invalid TOTP code",
                 })
                 await tty.send(
-                    f"{ANSI.BRIGHT_RED}Two-factor authentication failed.{ANSI.RESET}\r\n"
+                    f"{p.error}Two-factor authentication failed.{p.reset}\r\n"
                 )
                 await tty.pause()
                 return False
@@ -258,8 +263,9 @@ class LoginFlow:
             logger.warning("Could not update last_login for %s", user.username)
 
         self.bbs.events.emit("user:login", {"session": session, "user": user})
+        p = palette_for(session)  # themed from the bound account
         await tty.send(
-            f"{ANSI.BRIGHT_GREEN}Welcome back, "
-            f"{user.shown_name()}!{ANSI.RESET}\r\n"
+            f"{p.success}Welcome back, "
+            f"{user.shown_name()}!{p.reset}\r\n"
         )
         return True

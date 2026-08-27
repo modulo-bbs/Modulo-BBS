@@ -1,8 +1,8 @@
-{CLEAR}{HOME}{BRIGHT_CYAN}{BOLD}============================================================{RESET}
-{BRIGHT_CYAN}{BOLD}            MODULO BBS -- TOTP VERIFY{RESET}
-{BRIGHT_CYAN}{BOLD}============================================================{RESET}
+{CLEAR}{HOME}{ACCENT}{BOLD}============================================================{RESET}
+{ACCENT}{BOLD}            MODULO BBS -- TOTP VERIFY{RESET}
+{ACCENT}{BOLD}============================================================{RESET}
 
-{BRIGHT_GREEN}Enter your 6-digit verification code.{RESET}
+{SUCCESS}Enter your 6-digit verification code.{RESET}
 
-{BRIGHT_BLACK}------------------------------------------------------------{RESET}
-{BRIGHT_CYAN}Code: {RESET}
+{MUTED}------------------------------------------------------------{RESET}
+{ACCENT}Code: {RESET}

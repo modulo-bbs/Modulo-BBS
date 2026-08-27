@@ -155,3 +155,73 @@ def test_unhandled_key_falls_through(tmp_path):
         assert await p._handle_pim_key(s, "X") is False  # type: ignore[attr-defined]
 
     asyncio.run(_a())
+
+
+def test_slash_theme_at_prompt_persists_and_waits(tmp_path):
+    """`>` is a hotkey prompt: `/` then `theme amber` + Enter must save, and
+    the confirmation paints in a CUP overlay so the PIM is not scrolled."""
+    from unittest.mock import AsyncMock, patch
+
+    app = _app(tmp_path)
+
+    async def _a():
+        user = await app.users.create("dave", password="pw-test-123")
+        s = _session(user)
+        p = app.get_plugin("mainmenu")
+        assert p is not None
+        with patch("core.runner.read_key", new_callable=AsyncMock, return_value="ENTER"):
+            await p._dispatch_slash(s, "theme amber")  # type: ignore[attr-defined]
+        assert s.user.preferences.get("theme") == "amber"
+        out = bytes(s.writer.buf).decode("cp437", errors="replace")  # type: ignore[union-attr]
+        assert "Theme set to amber" in out
+        assert "any key dismiss" in out
+        assert "\x1b[2;1H" in out  # CUP to overlay top-left (row 2, col 1)
+        assert "┌" in out or "+" in out
+
+    asyncio.run(_a())
+
+
+def test_slash_theme_list_in_overlay(tmp_path):
+    """Bare `/theme` opens an up/down picker; ESC leaves the saved theme."""
+    from unittest.mock import AsyncMock, patch
+
+    app = _app(tmp_path)
+
+    async def _a():
+        user = await app.users.create("dave", password="pw-test-123")
+        s = _session(user)
+        p = app.get_plugin("mainmenu")
+        assert p is not None
+        with patch("core.runner.read_key", new_callable=AsyncMock, return_value="ESC"):
+            await p._dispatch_slash(s, "theme")  # type: ignore[attr-defined]
+        out = bytes(s.writer.buf).decode("cp437", errors="replace")  # type: ignore[union-attr]
+        assert "classic *" in out
+        assert "matrix" in out
+        assert "arrows select" in out
+        assert "\x1b[2;1H" in out
+        assert s.user.preferences.get("theme", "classic") in ("classic", None)
+
+    asyncio.run(_a())
+
+
+def test_slash_theme_picker_enter_applies(tmp_path):
+    """DOWN then Enter on `/theme` saves the next named palette."""
+    from unittest.mock import patch
+
+    app = _app(tmp_path)
+
+    async def _a():
+        user = await app.users.create("dave", password="pw-test-123")
+        s = _session(user)
+        p = app.get_plugin("mainmenu")
+        assert p is not None
+        keys = iter(["DOWN", "ENTER"])
+
+        async def _next_key(*_a, **_k):
+            return next(keys)
+
+        with patch("core.runner.read_key", side_effect=_next_key):
+            await p._dispatch_slash(s, "theme")  # type: ignore[attr-defined]
+        assert s.user.preferences.get("theme") == "amber"
+
+    asyncio.run(_a())

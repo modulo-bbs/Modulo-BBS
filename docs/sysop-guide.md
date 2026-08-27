@@ -1,13 +1,24 @@
 # Modulo BBS — SysOp Guide
 
+You run the board. Out of the box it should already *be* a board — not a
+kit you assemble. Change how it looks by dropping files (themes, screens),
+or point an agent at this tree and tell it to make those same changes.
+Either way the contract is the files on disk, not a special control panel.
+
+**To start the server:** the tree-root **`README.md`**. This guide is the
+rest — screens, themes, users, plugins.
+
 ## Quick Start
 
 ### Running the Server
 
 ```bash
-cd /home/dave/projects/bbs
-python3 run_server.py --port 6400 --ssh-port 6422 --plain
+venv/bin/python run_server.py --port 6400 --ssh-port 6422
 ```
+
+Once it is up, `/ver` at the home `>` prompt (and the splash `Version`
+line) show a dotted number plus a git short hash, e.g. `0.2.0 (8eae965)`.
+If that does not match the tree you just pulled, you are on an old process.
 
 Flags:
 - `--host HOST` — bind address (default: `127.0.0.1`, use `0.0.0.0` for LAN)
@@ -105,10 +116,33 @@ screens/splash.ans                    ← CP437 art version of the logon splash
 Resolution per name: `.ans` (CP437+ANSI) → `.asc` (plain ASCII) →
 `.txt` (shipped default). Delete your file to restore the default.
 
-Tokens (`{username}`, `{time}`, `{node}`, `{active}`, `{BRIGHT_CYAN}` …)
-work in any screen. Full vocabulary and rules: **`docs/screens.md`**.
+Tokens (`{username}`, `{time}`, `{node}`, `{active}`, `{ACCENT}`,
+`{BRIGHT_CYAN}` …) work in any screen. Semantic `{ACCENT}` / `{SUCCESS}` /
+`{WARNING}` / `{ERROR}` / `{MUTED}` / `{TEXT}` follow the caller's
+`/theme` (saved as `preferences.theme`). Literal colour names stay that
+colour. `.ans` files with painted SGR bytes are **not** recolored — they
+are art, not templates. Full vocabulary: **`docs/screens.md`**. Theme
+files (`themes/*.theme`) and the `/theme` picker: **`docs/themes.md`**.
 Each plugin's own `plugins/<name>/docs/README.md` lists its screen names,
-keys, config files, and data locations.
+keys, config files, and data locations. An in-board screens editor is a
+later accessory — reskins are files you drop, not something the BBS edits.
+
+### Colour themes
+
+Callers pick a named file after login. At the home `>` prompt press `/`,
+type `theme`, Enter. Arrows move; the overlay **previews** the highlight;
+Enter saves; ESC cancels. `/` then `theme amber` sets without the picker.
+
+`/` then `ver` prints the board version (and a git short hash) so you can
+tell this process matches the tree you think you are running. Number lives
+in `core/version.py`.
+
+Palettes live in **`themes/*.theme`** — one `key=fg` or `key=fg,bg` per
+line, DOS colour numbers (0–15). Missing keys use classic defaults. Drop
+`themes/sunset.theme` and it shows up in `/theme`; edit the file and the
+next paint picks it up. No Python, no restart. How-to and colour chart:
+**`docs/themes.md`**. Pre-login stays classic. `.ans` art does not follow
+the palette.
 
 ### Loading
 

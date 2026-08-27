@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pyotp
 
-from shared.telnet_protocol import ANSI
+from core.theme import palette_for
 
 logger = logging.getLogger("modulo.plugins.totp")
 
@@ -154,19 +154,20 @@ class TOTPFlow:
             name=user.username, issuer_name=self.ISSUER
         )
         await tty.send(self.screens.render(
-            "totp_setup.txt", SECRET=secret, URI=uri
+            "totp_setup.txt", session, SECRET=secret, URI=uri
         ))
         code = (await tty.read_line("Six-digit code: ")).strip()
+        p = palette_for(session)
         if self._otp(secret).verify(code):
             self.manager.set_secret(user.username, secret)
             await tty.send(
-                f"{ANSI.BRIGHT_GREEN}Two-factor authentication enabled."
-                f"{ANSI.RESET}\r\n"
+                f"{p.success}Two-factor authentication enabled."
+                f"{p.reset}\r\n"
             )
             return True
         await tty.send(
-            f"{ANSI.BRIGHT_RED}Code did not match. TOTP not enabled."
-            f"{ANSI.RESET}\r\n"
+            f"{p.error}Code did not match. TOTP not enabled."
+            f"{p.reset}\r\n"
         )
         return False
 
@@ -178,6 +179,6 @@ class TOTPFlow:
         if user is None:
             return False
         tty = Terminal(self.bbs, session)
-        await tty.send(self.screens.render("totp_verify.txt"))
+        await tty.send(self.screens.render("totp_verify.txt", session))
         code = (await tty.read_line("Six-digit code: ")).strip()
         return self.manager.verify(user.username, code)

@@ -1,0 +1,10 @@
+# Green mixed palette. Errors stay red.
+order=30
+accent=10
+success=2
+warning=14
+error=12
+muted=2
+text=10
+prompt=2
+highlight=0,2

@@ -10,8 +10,7 @@ immediate TOTP enrolment.
 
 from __future__ import annotations
 
-from shared.telnet_protocol import ANSI
-
+from core.theme import palette_for
 from core.user import UserExistsError
 from .login import ScreenLoader, Terminal
 
@@ -29,7 +28,7 @@ class RegistrationFlow:
         (the new user is authenticated), False on quit / disconnect."""
         tty = Terminal(self.bbs, session)
         while getattr(session, "is_active", True):
-            await tty.send(self.screens.render("register.txt"))
+            await tty.send(self.screens.render("register.txt", session))
 
             raw = (await tty.read_line("Username: ")).strip()
             if not raw:
@@ -38,18 +37,19 @@ class RegistrationFlow:
                 return False                       # back out to login/menu
             username = raw.lower()
 
+            p = palette_for(session)
             password = await tty.read_line("Password: ", secret=True)
             if not password:
                 await tty.send(
-                    f"{ANSI.BRIGHT_RED}Password cannot be empty.{ANSI.RESET}\r\n"
+                    f"{p.error}Password cannot be empty.{p.reset}\r\n"
                 )
                 await tty.pause()
                 continue
             confirm = await tty.read_line("Confirm password: ", secret=True)
             if password != confirm:
                 await tty.send(
-                    f"{ANSI.BRIGHT_RED}Passwords do not match. Try again."
-                    f"{ANSI.RESET}\r\n"
+                    f"{p.error}Passwords do not match. Try again."
+                    f"{p.reset}\r\n"
                 )
                 await tty.pause()
                 continue
@@ -66,14 +66,14 @@ class RegistrationFlow:
                 )
             except UserExistsError:
                 await tty.send(
-                    f"{ANSI.BRIGHT_RED}That username is already taken."
-                    f"{ANSI.RESET}\r\n"
+                    f"{p.error}That username is already taken."
+                    f"{p.reset}\r\n"
                 )
                 await tty.pause()
                 continue
             except ValueError as exc:
                 await tty.send(
-                    f"{ANSI.BRIGHT_RED}Invalid input: {exc}.{ANSI.RESET}\r\n"
+                    f"{p.error}Invalid input: {exc}.{p.reset}\r\n"
                 )
                 await tty.pause()
                 continue
@@ -85,9 +85,10 @@ class RegistrationFlow:
             session.username = user.username
             session.authenticated = True
 
+            p = palette_for(session)
             await tty.send(
-                f"{ANSI.BRIGHT_GREEN}Account created. Welcome, "
-                f"{user.shown_name()}!{ANSI.RESET}\r\n"
+                f"{p.success}Account created. Welcome, "
+                f"{user.shown_name()}!{p.reset}\r\n"
             )
 
             # Optional immediate TOTP enrolment.

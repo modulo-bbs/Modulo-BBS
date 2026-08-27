@@ -474,6 +474,11 @@ def test_screen_loader_substitutes_ansi_and_placeholders(tmp_path):
     assert "\x1b[" in text                 # ANSI escape injected
     assert "disconnect" in text.lower()
     assert "go back" not in text.lower()
+    assert "{ACCENT}" not in text
+    assert "{TEXT}" not in text
+    assert "{WARNING}" not in text
+    assert "{SUCCESS}" not in text
+    assert "{MUTED}" not in text
     from shared.telnet_protocol import ANSI as A
     assert A.CLEAR_SCREEN in text
 

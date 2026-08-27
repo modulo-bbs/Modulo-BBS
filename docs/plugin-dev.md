@@ -239,20 +239,31 @@ system:shutdown
 
 ## UI Patterns
 
+Colour after login comes from `palette_for(session)`, not hardcoded
+`ANSI.BRIGHT_CYAN`. Palettes are `themes/*.theme` files (DOS numbers).
+Roles, extra keys, and how to write a file: **`docs/themes.md`**. Screen
+tokens (`{ACCENT}` …): **`docs/screens.md`**.
+
 ### Sending Formatted Text
 
 ```python
+from core.theme import palette_for
 from shared.telnet_protocol import ANSI
 
-# Colored text
-self.bbs.send(session, f"{ANSI.BRIGHT_GREEN}Success!{ANSI.RESET}\r\n")
+p = palette_for(session)
+await self.bbs.send(session, f"{p.success}Success!{p.reset}\r\n")
+await self.bbs.send(session, f"{p.error}! failed{p.reset}\r\n")
 
-# Bold
-self.bbs.send(session, f"{ANSI.BOLD}Important:{ANSI.RESET} read this\r\n")
+# Bold (attribute, not a theme role)
+await self.bbs.send(session, f"{ANSI.BOLD}Important:{ANSI.RESET} read this\r\n")
 
 # Clear screen
-self.bbs.send(session, f"\033[2J\033[1;1H")
+await self.bbs.send(session, f"\033[2J\033[1;1H")
 ```
+
+Selected rows use `p.tab_fg` + `p.tab_bg`, not `ANSI.REVERSE` (REVERSE
+is a silver bar on SyncTERM and fights CRT palettes). Always pair a
+colour with `p.reset`.
 
 ### Menu Display
 
