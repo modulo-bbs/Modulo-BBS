@@ -18,7 +18,6 @@ class SessionState(Enum):
     NEGOTIATING = auto()    # Telnet negotiation in progress
     LOGIN = auto()          # Awaiting credentials
     MAIN_MENU = auto()      # At the main menu
-    CHATTING = auto()       # In chat/IM mode
     READING = auto()        # Reading messages
     WRITING = auto()        # Composing a message
     FILE_AREA = auto()      # In file section

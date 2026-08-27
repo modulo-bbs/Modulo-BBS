@@ -57,7 +57,7 @@ The terminal menu renders from the same registry and calls the same `ops.call()`
    source. Each plane serves only its own view of the schema.
 3. **Versioned from day one** (`/api/v1/`) — external code must not break when
    we add endpoints.
-4. **Not sysop-only**: messageboard/files/chat actions go through the same
+4. **Not sysop-only**: messageboard/files actions go through the same
    registry, so anyone can write a complete alternative frontend for *users*
    too, not just admins.
 
@@ -69,7 +69,7 @@ control-plane/data-plane split applied to *exposure*, not a second API:
 - **Management plane** — all sysop operations. Binds `127.0.0.1` only, never
   proxied, unreachable from any reverse proxy by construction. The browser
   dashboard talks to it locally/LAN.
-- **Public plane** — user operations (boards, chat, files, own profile).
+- **Public plane** — user operations (boards, files, own profile).
   Designed to sit behind a TLS-terminating reverse proxy for third-party
   frontends and bridges.
 

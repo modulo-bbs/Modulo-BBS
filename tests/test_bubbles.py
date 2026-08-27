@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from plugins.mainmenu.bubbles import render_bubbles
+from plugins.social.bubbles import render_bubbles
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 

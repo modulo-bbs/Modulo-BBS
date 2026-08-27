@@ -1,16 +1,15 @@
 """Logon sequencer plugin -- the orchestrator of the logon experience.
 
 The order of what a caller sees (splash, login, welcome, menu ...) is data,
-not code: the sysop configures ``logon_sequence`` in config.yaml and this
-plugin runs each step in order. Every step is pluggable:
+not code: the sysop edits ``plugins/logon/data/sequence`` and this plugin
+runs each step in order. Every step is pluggable:
 
     - ``screen:<file>``  display ``screens/<file>``, no input
-    - ``plugin:<name>``  run the named plugin's session flow
+    - ``plugin:<role>``  run the plugin filling that role (or directory name)
 
 The sequencer is itself an ordinary plugin -- it needs no special privileges,
-so it gets none. Because it is nothing but orchestration, a sysop can point
-the core's ``logon_plugin`` config key at any orchestrator (a wizard-style
-onboarding, straight-to-chat, kiosk mode) without touching core.
+so it gets none. Core points the ``logon`` role at any orchestrator (a
+wizard-style onboarding, straight-to-chat, kiosk mode) without touching core.
 
 Each executed step emits a ``logon:step`` event with ``{session, step, result}``
 giving instrumentation per-step visibility even if a later step fails.
@@ -50,12 +49,12 @@ class LogonPlugin(Plugin):
     menu_key = ""
     menu_order = 0
 
-    # Default sequence when config.yaml omits ``logon_sequence``. Mirrors the
-    # banner -> login -> welcome -> menu flow the transports used to hardcode.
+    # Default sequence when plugins/logon/data/sequence is missing.
     DEFAULT_SEQUENCE = [
         "screen:splash.txt",
         "plugin:login",
         "screen:welcome.txt",
+        "plugin:bulletins",
         "plugin:mainmenu",
     ]
 
@@ -65,14 +64,30 @@ class LogonPlugin(Plugin):
 
     # -- config ----------------------------------------------------------------
 
+    def _sequence_path(self):
+        """``plugins/logon/data/sequence``, or None if storage is unavailable."""
+        if self.bbs is None or getattr(self.bbs, "storage", None) is None:
+            return None
+        try:
+            return self.bbs.storage.dir("logon") / "sequence"
+        except Exception:  # noqa: BLE001
+            return None
+
     def _sequence(self) -> list[str]:
-        """The configured logon_sequence, or the DEFAULT_SEQUENCE."""
-        seq = self.bbs.config.get("logon_sequence") if self.bbs else None
-        if not seq:
-            return list(self.DEFAULT_SEQUENCE)
-        if isinstance(seq, str):
-            seq = [seq]
-        return [s for s in seq if isinstance(s, str)]
+        """Steps from ``data/sequence``, or DEFAULT_SEQUENCE if the file is empty."""
+        path = self._sequence_path()
+        if path is not None and path.is_file():
+            try:
+                lines = []
+                for raw in path.read_text(encoding="utf-8").splitlines():
+                    line = raw.split("#", 1)[0].strip()
+                    if line:
+                        lines.append(line)
+                if lines:
+                    return lines
+            except Exception:  # noqa: BLE001
+                logger.exception("failed to read logon sequence %s", path)
+        return list(self.DEFAULT_SEQUENCE)
 
     # -- lifecycle -------------------------------------------------------------
 
@@ -134,8 +149,12 @@ class LogonPlugin(Plugin):
         self._emit(session, f"screen:{filename}", "displayed")
 
     async def _run_plugin_step(self, session, name: str):
-        """Run a named plugin's session flow (its ``on_session_start``)."""
-        plugin = self.bbs.get_plugin(name)
+        """Run a named plugin's session flow (its ``on_session_start``).
+
+        ``name`` is a role (resolved via ``bbs.plugin_for``) so ``plugin:mainmenu``
+        follows the core role map, not a hard-coded folder.
+        """
+        plugin = self.bbs.plugin_for(name)
         if plugin is None:
             logger.warning("logon step references missing plugin %r", name)
             self._emit(session, f"plugin:{name}", "missing")

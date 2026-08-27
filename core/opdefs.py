@@ -1,7 +1,7 @@
 """Built-in operation registrations for Modulo BBS.
 
 Registers the standard operations on the global ops registry at import time.
-Groups: system, sessions, users, boards, doors, bulletins, chat, auth.
+Groups: system, sessions, users, boards, doors, bulletins, auth.
 
 Plane conventions (docs/one-api.md):
 * sysop-gated ops  -> management plane only (structural default)
@@ -409,50 +409,6 @@ def _bulletins_list(bbs, user, params):
 registry.register(
     "bulletins.list", description="Bulletins visible to caller.", handler=_bulletins_list
 )
-
-
-# ---------------------------------------------------------------------------
-# Chat
-# ---------------------------------------------------------------------------
-
-def _chat_plugin(bbs):
-    from plugins.chat import HUB  # process-wide singleton
-
-    plugin = bbs.get_plugin("chat")
-    if plugin is None:
-        raise OpsError("chat plugin not loaded")
-    return HUB
-
-
-def _chat_send(bbs, user, params):
-    if user is None:
-        raise PermissionDeniedError("login required")
-    text = params["text"]
-    if len(text) > 400:
-        raise ValidationError("text too long (max 400 chars)")
-    hub = _chat_plugin(bbs)
-    # Reuse the session fan-out: format like a normal chat line and push to
-    # every listening queue. sender session is unused by the hub.
-    bbs.events.emit("chat:message", {"user": user, "text": text})
-    asyncio.ensure_future(hub.broadcast(None, f"{user.shown_name()}> {text}"))
-    return {"sent": True}
-
-
-def _chat_names(bbs, user, params):
-    try:
-        hub = _chat_plugin(bbs)
-    except OpsError:
-        return {"names": []}
-    return {"names": hub.names()}
-
-
-registry.register(
-    "chat.send",
-    description="Send a line to the global chat channel.",
-    params={"text": str},
-    handler=_chat_send,
-)
-registry.register("chat.names", description="Current chat participants.", handler=_chat_names)
 
 
 # ---------------------------------------------------------------------------

@@ -1,11 +1,12 @@
-"""B8 — Social chat mode (Telegram-style): type at the prompt, Enter sends,
-UP/DOWN scrolls history, polling picks up other nodes' messages, NEW badges
-mark arrivals since entry. Replaces the classic reader on Social rooms.
+"""B8 — Social chat: one-line prompt, Enter/ESC compose, overlay notepad.
+
+Enter with text opens Post / Editor / Discard (Post default). Empty Enter,
+wrap, or LF opens the notepad; ESC keeps the draft. Posting always goes
+through the picker. Ctrl-S / Ctrl-E do not send.
 """
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,12 @@ import pytest
 from core import runner
 from core.app import BBSApp
 from core.user import User
-from plugins.mainmenu import MainmenuPlugin, _collapse_overlay_spacing
+from plugins.mainmenu import (
+    MainmenuPlugin,
+    _collapse_overlay_spacing,
+)
+from plugins.modal import ModalPlugin
+from plugins.modal.overlay import compact_overlay_geom, paint_overlay
 from server.session import Session
 
 
@@ -38,9 +44,17 @@ def _app(tmp_path: Path):
     from core.conversations import Conversations
 
     app.conversations = Conversations(app)
-    p = MainmenuPlugin()
-    p.on_load(app)
-    app.plugins = [p]
+    from plugins.bulletins import BulletinsPlugin
+    from plugins.dashboard import DashboardPlugin
+    from plugins.files import FilesPlugin
+    from plugins.social import SocialPlugin
+
+    loaded = []
+    for cls in (ModalPlugin, DashboardPlugin, SocialPlugin, FilesPlugin, BulletinsPlugin, MainmenuPlugin):
+        inst = cls()
+        inst.on_load(app)
+        loaded.append(inst)
+    app.plugins = loaded
     return app
 
 
@@ -64,16 +78,37 @@ def _seed(app):
     asyncio.run(_a())
 
 
+def _run_chat(s, app, conv, keys):
+    p = app.get_plugin("social")
+    orig = runner.read_key
+
+    async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
+        return next(keys)
+
+    runner.read_key = fake_rk  # type: ignore[assignment]
+    try:
+        asyncio.run(p._social_chat(s, conv))
+    finally:
+        runner.read_key = orig  # type: ignore[assignment]
+
+
+def _plain(s):
+    import re as _re
+
+    return _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "",
+                   bytes(s.writer.buf).decode("cp437", errors="replace"))
+
+
 def test_typing_at_prompt_posts_and_esc_exits(tmp_path):
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    s.terminal_type = "ANSI-BBS"  # exercise the CP437 box-drawing path
-    p = app.get_plugin("mainmenu")
+    s.terminal_type = "ANSI-BBS"
+    p = app.get_plugin("social")
 
     async def _a():
-        keys = iter(["h", "i", " ", "t", "h", "e", "r", "e", "ENTER", "ESC"])
+        keys = iter(["h", "i", " ", "t", "h", "e", "r", "e", "ENTER", "ENTER", "ESC"])
         orig = runner.read_key
 
         async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
@@ -92,14 +127,14 @@ def test_typing_at_prompt_posts_and_esc_exits(tmp_path):
         import re as _re
 
         plain = _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
-        assert "\u250c" in text          # bubbles drawn
-        assert "> hi there" in plain     # draft echoed at prompt
+        assert "\u250c" in text
+        assert "> hi there" in plain
+        assert "Post" in plain
 
     asyncio.run(_a())
 
 
 def test_enter_at_end_always_tail_anchored(tmp_path):
-    """Long thread: entering lands on the newest messages, not the top."""
     app = _app(tmp_path)
 
     async def _seed_many():
@@ -111,7 +146,7 @@ def test_enter_at_end_always_tail_anchored(tmp_path):
     asyncio.run(_seed_many())
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    p = app.get_plugin("mainmenu")
+    p = app.get_plugin("social")
 
     async def _a():
         keys = iter(["ESC"])
@@ -138,7 +173,7 @@ def test_up_scrolls_history_down_returns(tmp_path):
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    p = app.get_plugin("mainmenu")
+    p = app.get_plugin("social")
 
     async def _a():
         keys = iter(["UP", "UP", "DOWN", "ESC"])
@@ -153,7 +188,7 @@ def test_up_scrolls_history_down_returns(tmp_path):
         finally:
             runner.read_key = orig  # type: ignore[assignment]
         text = bytes(s.writer.buf).decode("cp437", errors="replace")
-        assert "history" in text   # status line shows hidden/newer count
+        assert "history" in text
 
     asyncio.run(_a())
 
@@ -163,7 +198,7 @@ def test_echo_suppressed_during_chat_restored_after(tmp_path):
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    p = app.get_plugin("mainmenu")
+    p = app.get_plugin("social")
 
     async def _a():
         assert not getattr(s, "suppress_echo", False)
@@ -183,54 +218,138 @@ def test_echo_suppressed_during_chat_restored_after(tmp_path):
     asyncio.run(_a())
 
 
-# -- multi-line compose (B8 part 4: Ctrl-Enter newline, growing input) -------
+def test_entry_crlf_lf_does_not_open_editor(tmp_path):
+    """Enter on the room list is CR; SyncTERM stashes the trailing LF.
+    That leftover must not open the notepad as if it were empty Enter."""
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    s._line_buffer = "\n"
+    _run_chat(s, app, {"id": "b1", "title": "General"}, iter(["ESC"]))
+    assert "[2 lines]" not in _plain(s)
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert len(msgs) == 1
 
 
-def _run_chat(s, app, conv, keys):
-    p = app.get_plugin("mainmenu")
-    orig = runner.read_key
-
-    async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
-        return next(keys)
-
-    runner.read_key = fake_rk  # type: ignore[assignment]
-    try:
-        asyncio.run(p._social_chat(s, conv))
-    finally:
-        runner.read_key = orig  # type: ignore[assignment]
-
-
-def _plain(s):
-    import re as _re
-
-    return _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "",
-                   bytes(s.writer.buf).decode("cp437", errors="replace"))
-
-
-def test_lf_inserts_newline_and_input_area_grows(tmp_path):
+def test_empty_enter_opens_editor(tmp_path):
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
     _run_chat(s, app, {"id": "b1", "title": "General"},
-              iter(["h", "i", "LF", "y", "o", "ESC"]))
+              iter(["ENTER"] + list("hi") + ["ESC", "ESC"]))
     text = _plain(s)
-    assert "> hi" in text          # first physical input row
-    assert "  yo" in text          # newline opened a second input row
+    assert "+----" in text or "\u250c" in bytes(s.writer.buf)
+    assert "ESC back" in text
     msgs = asyncio.run(app.conversations.list_messages("b1"))
-    assert len(msgs) == 1          # ESC never posts
+    assert len(msgs) == 1
 
 
-def test_long_line_wraps_into_extra_row_at_77_cols(tmp_path):
+def test_typed_enter_then_enter_posts(tmp_path):
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    keys = ["x"] * 78 + ["ESC"]
+    _run_chat(s, app, {"id": "b1", "title": "General"},
+              iter(list("hi") + ["ENTER", "ENTER", "ESC"]))
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert msgs[-1]["body"] == "hi"
+
+
+def test_picker_down_opens_editor(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    _run_chat(s, app, {"id": "b1", "title": "General"},
+              iter(list("hi") + ["ENTER", "DOWN", "ENTER"] + list("xy")
+                   + ["ESC", "ENTER", "ENTER", "ESC"]))
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert msgs[-1]["body"] == "hixy"
+
+
+def test_picker_discard_clears_draft(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    _run_chat(s, app, {"id": "b1", "title": "General"},
+              iter(list("hi") + ["ENTER", "DOWN", "DOWN", "ENTER", "ESC"]))
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert len(msgs) == 1
+    assert "> hi" in _plain(s)
+
+
+def test_compose_picker_overlay_is_compact():
+    """Three options: a small CUP box, not the notepad's full-screen geom."""
+    from core.theme import load_palette
+
+    s = _session()
+    s.terminal_type = "ANSI-BBS"
+    s.terminal_height = 24
+    geom = compact_overlay_geom(s, n_rows=3, min_inner=28)
+    top, L, wid, interior, inner_w = geom
+    assert interior == 3
+    assert wid < 50
+    assert top >= 14
+    assert L > 1
+    pal = load_palette("classic")
+    painted = paint_overlay(
+        s, ["Post", "Editor", "Discard"], " arrows  Enter  ESC ", pal, geom=geom
+    )
+    assert painted.count("\x1b[") >= 5
+    assert "\r\n" not in painted
+
+
+def test_picker_esc_keeps_draft(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    _run_chat(s, app, {"id": "b1", "title": "General"},
+              iter(list("hi") + ["ENTER", "ESC", "ESC"]))
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert len(msgs) == 1
+    assert "> hi" in _plain(s)
+
+
+def test_lf_opens_editor_with_newline(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    _run_chat(s, app, {"id": "b1", "title": "General"},
+              iter(["h", "i", "LF", "y", "o", "ESC", "ESC"]))
+    text = _plain(s)
+    assert "[2 lines]" in text
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert len(msgs) == 1
+
+
+def test_wrap_opens_editor_with_wrapping_char(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    keys = ["x"] * 78 + ["ESC", "ESC"]
     _run_chat(s, app, {"id": "b1", "title": "General"}, iter(keys))
     text = _plain(s)
-    # '> ' + 77 wrapped columns, continuation on its own '  '-prefixed row
-    assert "> " + "x" * 77 + "\r\n  x" in text
+    assert "[2 lines]" in text
+    assert "  x" not in text.split("[2 lines]")[0]  # prompt never grew a wrap row
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert len(msgs) == 1
+
+
+def test_wrap_then_post_keeps_full_line(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    keys = ["x"] * 78 + ["ESC", "ENTER", "ENTER", "ESC"]
+    _run_chat(s, app, {"id": "b1", "title": "General"}, iter(keys))
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert msgs[-1]["body"] == "x" * 78
 
 
 def test_enter_posts_multiline_body_with_newlines_intact(tmp_path):
@@ -239,7 +358,7 @@ def test_enter_posts_multiline_body_with_newlines_intact(tmp_path):
     dave = User(username="dave", groups=[])
     s = _session(dave)
     _run_chat(s, app, {"id": "b1", "title": "General"},
-              iter(["a", "LF", "b", "ENTER", "ESC"]))
+              iter(["ENTER", "a", "ENTER", "b", "ESC", "ENTER", "ENTER", "ESC"]))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
     assert msgs[-1]["body"] == "a\nb"
     assert msgs[-1]["author"] == "dave"
@@ -251,33 +370,30 @@ def test_newline_only_draft_is_not_posted(tmp_path):
     dave = User(username="dave", groups=[])
     s = _session(dave)
     _run_chat(s, app, {"id": "b1", "title": "General"},
-              iter(["LF", "ENTER", "ESC"]))
+              iter(["LF", "ESC", "ESC"]))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
-    assert len(msgs) == 1          # only the seeded message
+    assert len(msgs) == 1
 
 
 def test_crlf_trailing_lf_does_not_leak_into_next_draft(tmp_path):
-    """Real CRLF clients leave '\n' in the stash after Enter's '\r'; it must
-    be swallowed on send, or the next draft starts with a phantom newline."""
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
 
     async def _a():
-        keys = iter(["h", "i", "ENTER", "o", "ENTER", "ESC"])
+        keys = iter(["h", "i", "ENTER", "ENTER", "o", "ENTER", "ENTER", "ESC"])
         orig = runner.read_key
 
         async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
             key = next(keys)
-            # simulate a CRLF client: Enter's \r consumed, \n stashed behind
             if key == "ENTER":
                 sess._line_buffer = "\n"
             return key
 
         runner.read_key = fake_rk  # type: ignore[assignment]
         try:
-            await app.get_plugin("mainmenu")._social_chat(
+            await app.get_plugin("social")._social_chat(
                 s, {"id": "b1", "title": "General"})
         finally:
             runner.read_key = orig  # type: ignore[assignment]
@@ -285,16 +401,10 @@ def test_crlf_trailing_lf_does_not_leak_into_next_draft(tmp_path):
     asyncio.run(_a())
     msgs = asyncio.run(app.conversations.list_messages("b1"))
     assert msgs[-2]["body"] == "hi"
-    assert msgs[-1]["body"] == "o"          # not "\no"
+    assert msgs[-1]["body"] == "o"
 
 
 def test_no_emitted_segment_exceeds_79_visible_columns(tmp_path):
-    """Dave's SyncTERM repro (B8 part 4 regression): the pre-part-4 redraw
-    echoed the whole draft on ONE line, so past end-of-line the terminal
-    autowrapped it — every keystroke scrolled the screen and duplicated the
-    row. Walk the raw output through a minimal 80x24 terminal model and
-    assert nothing we send ever forces a wrap/scroll.
-    """
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
@@ -302,14 +412,13 @@ def test_no_emitted_segment_exceeds_79_visible_columns(tmp_path):
     body = ("OK, So here is another attempt at writing a long message "
             "first wraparound will be tested, and you see what happened.")
     _run_chat(s, app, {"id": "b1", "title": "General"},
-              iter(list(body) + ["ESC"]))
+              iter(list(body) + ["ESC", "ESC"]))
 
     import re as _re
 
     raw = bytes(s.writer.buf).decode("cp437", errors="replace")
     W, H = 80, 24
     row = col = 1
-    csi = None
     for tok in _re.split(r"(\x1b\[[0-9;]*[A-Za-z])", raw):
         if not tok:
             continue
@@ -318,11 +427,6 @@ def test_no_emitted_segment_exceeds_79_visible_columns(tmp_path):
                 p = tok[2:-1].split(";")
                 row = int(p[0] or 1)
                 col = int(p[1] or 1) if len(p) > 1 else 1
-            elif tok[-1] == "J":
-                pass  # erase display/from-cursor: no cursor movement
-            elif tok[-1] == "K":
-                pass  # erase line
-            # SGR (m) and anything else: no movement
             continue
         for ch in tok:
             if ch == "\r":
@@ -333,7 +437,7 @@ def test_no_emitted_segment_exceeds_79_visible_columns(tmp_path):
                 continue
             else:
                 if col > W:
-                    row += 1  # pending autowrap fires on next printable
+                    row += 1
                     col = 1
                 col += 1
             if row > H:
@@ -342,54 +446,21 @@ def test_no_emitted_segment_exceeds_79_visible_columns(tmp_path):
                     f"col={col} near {raw[max(0, raw.find(tok)-40):raw.find(tok)+20]!r}")
 
 
-def test_input_rows_compacts_tall_draft_keeping_latest_lines(tmp_path):
-    app = _app(tmp_path)
-    _seed(app)
-    dave = User(username="dave", groups=[])
-    s = _session(dave)             # 24 rows -> cap 18, then compact to 3
-    keys: list[str] = []
-    for n in range(1, 26):
-        keys.extend(f"L{n:02d}")
-        if n < 25:
-            keys.append("LF")
-    _run_chat(s, app, {"id": "b1", "title": "General"}, iter(keys + ["ESC"]))
-    raw = bytes(s.writer.buf).decode("cp437", errors="replace")
-    # final input-area state = everything after the last erase-to-end
-    import re as _re
-
-    final = _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", raw.rsplit("\x1b[J", 1)[-1])
-    assert "> [18 lines - Ctrl-E to view]" in final
-    assert "L25" in final and "L24" in final   # newest lines survive
-    assert "L01" not in final and "L08" not in final  # older rows hidden
-
-
-def _run_chat_with_editor(s, app, conv, keys):
-    """Drive _social_chat with a scripted read_key stream (editor included)."""
-    p = app.get_plugin("mainmenu")
-    orig_rk = runner.read_key
-
-    async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
-        return next(keys)
-
-    runner.read_key = fake_rk  # type: ignore[assignment]
-    try:
-        asyncio.run(p._social_chat(s, conv))
-    finally:
-        runner.read_key = orig_rk  # type: ignore[assignment]
-
-
-def test_ctrl_e_opens_notepad_and_ctrl_enter_sends(tmp_path):
+def test_collapsed_preview_after_editor(tmp_path):
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    keys = ["CTRL_E"] + list("hi") + ["ENTER", "ENTER"] + list("world") + ["LF", "ESC"]
-    _run_chat_with_editor(s, app, {"id": "b1", "title": "General"}, iter(keys))
+    keys: list[str] = ["ENTER"]
+    for n in range(1, 11):
+        keys.extend(f"L{n:02d}")
+        if n < 10:
+            keys.append("ENTER")
+    keys.extend(["ESC", "ESC"])
+    _run_chat(s, app, {"id": "b1", "title": "General"}, iter(keys))
     text = _plain(s)
-    assert "+----" in text or "\u250c" in bytes(s.writer.buf)  # box drawn
-    msgs = asyncio.run(app.conversations.list_messages("b1"))
-    assert msgs[-1]["body"] == "hi\nworld"   # double-spacing collapsed at save
-    assert msgs[-1]["author"] == "dave"
+    assert "[10 lines]" in text
+    assert "Ctrl-E" not in text
 
 
 def test_notepad_save_collapses_blank_lines_to_single_spacing():
@@ -399,69 +470,67 @@ def test_notepad_save_collapses_blank_lines_to_single_spacing():
     assert _collapse_overlay_spacing("  indented") == "  indented"
 
 
-def test_notepad_ctrl_s_collapses_tomfoolery_blank_lines(tmp_path):
+def test_post_collapses_tomfoolery_blank_lines(tmp_path):
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
     keys = (
-        ["CTRL_E"] + list("up") + ["ENTER"] * 8 + list("down") + ["CTRL_S", "ESC"]
+        ["ENTER"] + list("up") + ["ENTER"] * 8 + list("down")
+        + ["ESC", "ENTER", "ENTER", "ESC"]
     )
-    _run_chat_with_editor(s, app, {"id": "b1", "title": "General"}, iter(keys))
+    _run_chat(s, app, {"id": "b1", "title": "General"}, iter(keys))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
     assert msgs[-1]["body"] == "up\ndown"
 
 
-def test_notepad_esc_cancels_without_sending(tmp_path):
+def test_editor_esc_keeps_text_does_not_post(tmp_path):
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    # ESC cancels the overlay: "xy" is discarded, chat-box "hi" is restored,
-    # second ESC leaves chat with nothing posted.
     before = asyncio.run(app.conversations.list_messages("b1"))
-    keys = ["h", "i", "CTRL_E"] + list("xy") + ["ESC", "ESC"]
-    _run_chat_with_editor(s, app, {"id": "b1", "title": "General"}, iter(keys))
+    _run_chat(s, app, {"id": "b1", "title": "General"},
+              iter(list("hi") + ["ENTER", "DOWN", "ENTER"] + list("xy") + ["ESC", "ESC"]))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
     assert msgs == before
+    assert "> [1 lines]" in _plain(s) or "> hixy" in _plain(s)
 
 
-def test_notepad_ctrl_s_saves_and_sends(tmp_path):
+def test_ctrl_s_does_not_post(tmp_path):
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    keys = ["h", "i", "CTRL_E"] + list("xy") + ["CTRL_S", "ESC"]
-    _run_chat_with_editor(s, app, {"id": "b1", "title": "General"}, iter(keys))
+    _run_chat(s, app, {"id": "b1", "title": "General"},
+              iter(["ENTER"] + list("xy") + ["CTRL_S", "ESC", "ESC"]))
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert len(msgs) == 1
+    assert "Ctrl-S save" not in _plain(s)
+    assert "ESC back" in _plain(s)
+
+
+def test_editor_esc_then_post(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    _run_chat(s, app, {"id": "b1", "title": "General"},
+              iter(list("hi") + ["ENTER", "DOWN", "ENTER"] + list("xy")
+                   + ["ESC", "ENTER", "ENTER", "ESC"]))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
     assert msgs[-1]["body"] == "hixy"
-    assert "Ctrl-S save / ESC cancel" in _plain(s)
 
 
-def test_notepad_ctrl_e_carries_draft_back_to_chat_box(tmp_path):
+def test_tall_draft_collapses_to_preview_then_posts(tmp_path):
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    # Ctrl-E carries the draft back into the chat box; ENTER then posts it.
-    keys = ["h", "i", "CTRL_E"] + list("xy") + ["CTRL_E", "ENTER", "ESC"]
-    _run_chat_with_editor(s, app, {"id": "b1", "title": "General"}, iter(keys))
-    msgs = asyncio.run(app.conversations.list_messages("b1"))
-    assert msgs[-1]["body"] == "hixy"
-
-
-def test_chat_box_collapses_tall_draft_to_preview(tmp_path):
-    app = _app(tmp_path)
-    _seed(app)
-    dave = User(username="dave", groups=[])
-    s = _session(dave)
-    # 240 chars -> 4 display rows -> collapses to preview + last 2 rows so
-    # a carried-back editor draft never walls over the bubble thread; the
-    # full draft still posts intact from the collapsed preview.
-    keys = ["CTRL_E"] + ["a"] * 240 + ["CTRL_E", "ENTER", "ESC"]
-    _run_chat_with_editor(s, app, {"id": "b1", "title": "General"}, iter(keys))
+    keys = ["ENTER"] + ["a"] * 240 + ["ESC", "ENTER", "ENTER", "ESC"]
+    _run_chat(s, app, {"id": "b1", "title": "General"}, iter(keys))
     text = _plain(s)
-    assert "> [4 lines - Ctrl-E to view]" in text
+    assert "[4 lines]" in text
     msgs = asyncio.run(app.conversations.list_messages("b1"))
     assert msgs[-1]["body"] == "a" * 240
 
@@ -471,9 +540,8 @@ def test_notepad_arrows_insert_midline(tmp_path):
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    # "ac", LEFT over the c, insert b -> "abc", Ctrl-Enter sends.
-    keys = ["CTRL_E"] + list("ac") + ["LEFT"] + ["b", "LF", "ESC"]
-    _run_chat_with_editor(s, app, {"id": "b1", "title": "General"}, iter(keys))
+    keys = ["ENTER"] + list("ac") + ["LEFT", "b", "ESC", "ENTER", "ENTER", "ESC"]
+    _run_chat(s, app, {"id": "b1", "title": "General"}, iter(keys))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
     assert msgs[-1]["body"] == "abc"
 
@@ -483,13 +551,11 @@ def test_notepad_capacity_capped_to_box(tmp_path):
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    s.terminal_height = 8          # interior 2 rows x 76 cols -> cap 152
-    p = app.get_plugin("mainmenu")
+    s.terminal_height = 8
+    p = app.get_plugin("social")
 
     async def _a():
-        # editor is entered directly: no leading CTRL_E (the chat eats it).
-        # Ctrl-E exits keeping the draft (ESC would cancel).
-        keys = iter(["x"] * 200 + ["CTRL_E"])
+        keys = iter(["x"] * 200 + ["ESC"])
         orig = runner.read_key
 
         async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
@@ -502,7 +568,7 @@ def test_notepad_capacity_capped_to_box(tmp_path):
         finally:
             runner.read_key = orig  # type: ignore[assignment]
         assert posted is False
-        assert draft == "x" * 152   # overflow refused, box never scrolls
+        assert draft == "x" * 152
 
     asyncio.run(_a())
 
@@ -511,7 +577,7 @@ def test_notepad_dead_session_exits_keeping_draft(tmp_path):
     app = _app(tmp_path)
     _seed(app)
     s = _session(User(username="dave", groups=[]))
-    p = app.get_plugin("mainmenu")
+    p = app.get_plugin("social")
 
     async def _a():
         from server.session import SessionState
@@ -525,24 +591,21 @@ def test_notepad_dead_session_exits_keeping_draft(tmp_path):
     asyncio.run(_a())
 
 
-def test_notepad_enter_swallows_crlf_trailing_lf(tmp_path):
-    """CRLF clients: Enter's CR inserts one newline; the trailing LF left in
-    the stash must not surface as an immediate Ctrl-Enter send (Dave: 'enter
-    key is posting instead of CR/LF in the editor')."""
+def test_notepad_enter_and_lf_insert_not_send(tmp_path):
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    p = app.get_plugin("mainmenu")
+    p = app.get_plugin("social")
 
     async def _a():
-        keys = iter(["ENTER", "x", "LF"])
+        keys = iter(["ENTER", "x", "LF", "ESC"])
         orig = runner.read_key
 
         async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
             k = next(keys)
             if k == "ENTER":
-                sess._line_buffer = "\n"   # simulate a CRLF client
+                sess._line_buffer = "\n"
             return k
 
         runner.read_key = fake_rk  # type: ignore[assignment]
@@ -551,7 +614,7 @@ def test_notepad_enter_swallows_crlf_trailing_lf(tmp_path):
                 s, {"id": "b1", "title": "General"}, "")
         finally:
             runner.read_key = orig  # type: ignore[assignment]
-        assert posted is True
-        assert draft == "x"        # leading blank collapsed; no premature send
+        assert posted is False
+        assert draft == "\nx\n"
 
     asyncio.run(_a())

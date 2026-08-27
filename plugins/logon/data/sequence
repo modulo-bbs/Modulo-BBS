@@ -1,0 +1,8 @@
+# Logon sequence — one step per line. Owned by the logon plugin.
+#   screen:<file>   display screens/<file>, no input
+#   plugin:<role>   run the plugin filling that role (or that directory name)
+screen:splash.txt
+plugin:login
+screen:welcome.txt
+plugin:bulletins
+plugin:mainmenu

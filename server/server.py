@@ -6,7 +6,7 @@ The server owns the transport and the protocol negotiation. Everything a
 caller sees after the handshake -- splash, login, welcome, menu -- is owned
 by plugins: after handshake the server invokes the core bootstrap hook
 (:func:`core.runner.run_bootstrap`), which hands the session to the plugin
-named by config key ``logon_plugin`` (the ``logon`` sequencer by default).
+named by the ``logon`` role in config (the ``logon`` sequencer by default).
 If that plugin is missing or broken, the hook sends a minimal notice and
 closes cleanly -- it never hangs.
 """

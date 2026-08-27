@@ -1,12 +1,19 @@
-"""Tests for the PIM tab registry (build-plan § Step 6)."""
+"""Tests for the PIM tab registry (home file + loaded plugins)."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from core.app import BBSApp
 from core.user import User
-from plugins.mainmenu.tabs import DEFAULT_TABS, load_tabs, visible_tabs
+from plugins.base import Plugin
+from plugins.mainmenu.tabs import DEFAULT_HOME, load_home_names, load_tabs, visible_tabs
+
+
+class _Named(Plugin):
+    def __init__(self, name: str, label: str, requires=None):
+        self.name = name
+        self.home_label = label
+        self.menu_requires = requires
 
 
 def _app(tmp_path: Path) -> BBSApp:
@@ -15,14 +22,22 @@ def _app(tmp_path: Path) -> BBSApp:
     return app
 
 
+def _stock(app):
+    app.plugins = [
+        _Named("dashboard", "Dashboard"),
+        _Named("social", "Social"),
+        _Named("files", "Files"),
+        _Named("bulletins", "Bulletins"),
+    ]
+
+
 def test_default_tabs_load(tmp_path):
     app = _app(tmp_path)
+    _stock(app)
     tabs = load_tabs(app)
-    assert len(tabs) == len(DEFAULT_TABS)
     assert [t["id"] for t in tabs] == ["dashboard", "social", "files", "bulletins"]
     assert tabs[0]["key"] == "1"
     assert tabs[1]["id"] == "social" and tabs[1]["key"] == "2"
-    # B5: Boards and DMs are gone as tabs — DMs live inside Social (OQ2).
     assert all(t["id"] not in ("boards", "dms") for t in tabs)
 
 
@@ -35,50 +50,47 @@ def test_visible_tabs_gating():
     ]
     assert len(visible_tabs(tabs, pleb)) == 1
     assert len(visible_tabs(tabs, sysop)) == 2
-    # anonymous sees only public
     assert len(visible_tabs(tabs, None)) == 1
 
 
-def test_sysop_override_file(tmp_path):
+def test_home_file_reorder_and_omit(tmp_path):
     app = _app(tmp_path)
+    _stock(app)
     md = app.storage.dir("mainmenu")
-    override = [
-        {"id": "a", "label": "A", "kind": "board", "key": "1", "requires": []},
-        {"id": "b", "label": "B", "kind": "dm", "key": "2", "requires": []},
-    ]
-    (md / "tabs.json").write_text(json.dumps(override), encoding="utf-8")
+    (md / "home").write_text("social\nfiles\n", encoding="utf-8")
     tabs = load_tabs(app)
-    assert [t["id"] for t in tabs] == ["a", "b"]
+    assert [t["id"] for t in tabs] == ["social", "files"]
+    assert tabs[0]["key"] == "1"
 
 
-def test_plugin_contributed_tab(tmp_path):
+def test_home_skips_missing_plugin(tmp_path):
     app = _app(tmp_path)
-    import plugins.mainmenu.tabs as tm
-    orig = tm.DEFAULT_TABS
-    tm.DEFAULT_TABS = orig[:2]  # leave room for contributed
-    try:
-        class FakePlugin:
-            pim_tab = {"id": "extra", "label": "Extra", "kind": "all", "key": "9", "requires": []}
+    app.plugins = [_Named("social", "Social")]
+    md = app.storage.dir("mainmenu")
+    (md / "home").write_text("dashboard\nsocial\nfiles\n", encoding="utf-8")
+    tabs = load_tabs(app)
+    assert [t["id"] for t in tabs] == ["social"]
 
-        app.plugins = [FakePlugin()]  # type: ignore[assignment]
-        tabs = load_tabs(app)
-        assert any(t["id"] == "extra" for t in tabs)
-    finally:
-        tm.DEFAULT_TABS = orig
+
+def test_unlisted_plugin_does_not_appear(tmp_path):
+    app = _app(tmp_path)
+    _stock(app)
+    app.plugins.append(_Named("classifieds", "Classifieds"))
+    tabs = load_tabs(app)
+    assert all(t["id"] != "classifieds" for t in tabs)
 
 
 def test_truncates_to_five(tmp_path):
     app = _app(tmp_path)
-
-    class Many:
-        pass
-
-    # inject 10 fake plugins each contributing a tab
-    plugins = []
-    for i in range(10):
-        p = Many()
-        p.pim_tab = {"id": f"x{i}", "label": f"X{i}", "kind": "all", "key": str(i), "requires": []}  # type: ignore[attr-defined]
-        plugins.append(p)
-    app.plugins = plugins
+    names = [f"x{i}" for i in range(10)]
+    app.plugins = [_Named(n, n.upper()) for n in names]
+    md = app.storage.dir("mainmenu")
+    (md / "home").write_text("\n".join(names) + "\n", encoding="utf-8")
     tabs = load_tabs(app)
     assert len(tabs) <= 5
+    assert [t["id"] for t in tabs] == names[:5]
+
+
+def test_default_home_names_when_file_missing(tmp_path):
+    app = _app(tmp_path)
+    assert load_home_names(app) == DEFAULT_HOME

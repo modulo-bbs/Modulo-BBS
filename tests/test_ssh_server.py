@@ -56,17 +56,32 @@ def _make_app(tmp_path):
     """BBSApp wired to throwaway users + throwaway screens tree.
 
     Pointing the screen service at tmp_path keeps live sysop reskins
-    (plugins/*/screens overrides) out of test runs.
+    (plugins/*/screens overrides) out of test runs. Logon sequence is
+    written into the throwaway storage tree so the shipped file is not used.
     """
     app = BBSApp(users_dir=tmp_path / "users")
+    app.storage.plugins_dir = tmp_path / "plugins"
     app.screens.plugins_root = tmp_path
-    # Minimal board-global logon screens (logon resolves them from the
-    # project-root-equivalent "screens/" under plugins_root).
     screens = tmp_path / "screens"
     screens.mkdir(parents=True, exist_ok=True)
     (screens / "splash.txt").write_bytes(b"Welcome to Modulo BBS\r\n")
     (screens / "welcome.txt").write_bytes(b"WELCOME ABOARD\r\n")
-    plugins = [LoginPlugin(), LogonPlugin(), MainmenuPlugin()]
+    seq = app.storage.dir("logon") / "sequence"
+    seq.write_text(
+        "screen:splash.txt\nplugin:login\nscreen:welcome.txt\nplugin:mainmenu\n",
+        encoding="utf-8",
+    )
+    from plugins.bulletins import BulletinsPlugin
+    from plugins.dashboard import DashboardPlugin
+    from plugins.files import FilesPlugin
+    from plugins.modal import ModalPlugin
+    from plugins.social import SocialPlugin
+
+    plugins = [
+        LoginPlugin(), LogonPlugin(), ModalPlugin(),
+        DashboardPlugin(), SocialPlugin(), FilesPlugin(), BulletinsPlugin(),
+        MainmenuPlugin(),
+    ]
     for plugin in plugins:
         plugin.on_load(app)
     app.plugins = plugins
@@ -113,9 +128,11 @@ def test_ssh_login_flow_uses_login_plugin(tmp_path):
     assert "Welcome back, Alice" in text          # login plugin's success line
     # PIM is now the default home — accept either the classic menu or the
     # tabbed chrome (both are valid per preferences.home_mode).
-    assert ("Main Menu" in text or "Boards" in text or "up/dn select" in text)
+    assert ("Main Menu" in text or "Dashboard" in text or "Social" in text
+            or "up/dn select" in text or "WASD select" in text)
     # System Info is on the classic menu; the PIM shows the pane hint instead
-    assert ("System Info" in text or "up/dn select" in text or "Boards" in text)
+    assert ("System Info" in text or "up/dn select" in text or "WASD select" in text
+            or "Dashboard" in text or "Social" in text)
     assert "Goodbye! Thanks for calling." in text
     assert chan.is_closing() or "Goodbye!" in text
 
@@ -165,7 +182,8 @@ def test_ssh_registration_via_login_screen(tmp_path):
     text = chan.text
     assert "Account created. Welcome, carol!" in text   # falls back to username
     # PIM is default home — same as above
-    assert ("Main Menu" in text or "Boards" in text or "up/dn select" in text)
+    assert ("Main Menu" in text or "Dashboard" in text or "Social" in text
+            or "up/dn select" in text or "WASD select" in text)
     # The account was actually persisted by the login plugin.
     assert run(app.users.get("carol")) is not None
 

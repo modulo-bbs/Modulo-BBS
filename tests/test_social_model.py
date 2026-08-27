@@ -15,7 +15,7 @@ import pytest
 from core.app import BBSApp
 from core.conversations import Conversations
 from core.user import User
-from plugins.mainmenu.social import Room, social_rooms
+from plugins.social.social import Room, social_rooms
 
 
 def _convs(tmp_path: Path) -> Conversations:

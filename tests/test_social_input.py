@@ -8,13 +8,17 @@ into drafts. Tab switching (LEFT/RIGHT/1..5) stays with the PIM layer.
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 
 from core import runner
 from core.app import BBSApp
 from core.user import User
+from plugins.dashboard import DashboardPlugin
+from plugins.files import FilesPlugin
 from plugins.mainmenu import MainmenuPlugin
+from plugins.modal import ModalPlugin
+from plugins.social import SocialPlugin
+from plugins.bulletins import BulletinsPlugin
 from server.session import Session
 
 
@@ -39,18 +43,12 @@ def _app(tmp_path: Path):
     from core.conversations import Conversations
 
     app.conversations = Conversations(app)
-    p = MainmenuPlugin()
-    p.on_load(app)
-    app.plugins = [p]
-    # Sysop tabs override: SOCIAL present pre-flip (B5 will make it default)
-    d = tmp_path / "plugins" / "mainmenu" / "data"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "tabs.json").write_text(json.dumps([
-        {"id": "dashboard", "label": "Dashboard", "kind": "dashboard", "key": "1"},
-        {"id": "social", "label": "Social", "kind": "all", "key": "2"},
-        {"id": "files", "label": "Files", "kind": "files", "key": "3"},
-        {"id": "bulletins", "label": "Bulletins", "kind": "bulletins", "key": "4"},
-    ]))
+    loaded = []
+    for cls in (ModalPlugin, DashboardPlugin, SocialPlugin, FilesPlugin, BulletinsPlugin, MainmenuPlugin):
+        inst = cls()
+        inst.on_load(app)
+        loaded.append(inst)
+    app.plugins = loaded
     return app
 
 

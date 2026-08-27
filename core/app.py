@@ -70,7 +70,8 @@ class BBSApp:
         self.user_manager = UserManager(users_dir)
         self.plugins: list[Any] = list(plugins) if plugins else []
         # Server configuration (loaded from config.yaml by run_server.py).
-        # Plugins read it via ``bbs.config`` (e.g. logon_sequence).
+        # Role keys (login, logon, mainmenu, modal) map a job to a plugin
+        # directory; plugins read the rest via ``bbs.config``.
         self.config: dict = dict(config) if config else {}
         # Per-plugin data directories: bbs.storage.dir("messageboard") ->
         # plugins/messageboard/data/ (created on demand).
@@ -112,6 +113,30 @@ class BBSApp:
             if getattr(p, "name", None) == name:
                 return p
         return None
+
+    def role_plugin_name(self, role: str) -> str:
+        """Directory name that fills ``role`` (config map, else the role itself).
+
+        ``config.yaml`` lines like ``modal: awesomemodal`` swap the plugin
+        without changing callers. Nested dicts (``server:``, ``api:``) are
+        ignored. Legacy ``logon_plugin:`` still fills the ``logon`` role.
+        """
+        role = (role or "").strip()
+        cfg = self.config or {}
+        raw = cfg.get(role)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+        if role == "logon":
+            legacy = cfg.get("logon_plugin")
+            if isinstance(legacy, str) and legacy.strip():
+                return legacy.strip()
+        return role
+
+    def plugin_for(self, role: str):
+        """Return the plugin that fills ``role``, or None if it is not loaded."""
+        if not role:
+            return None
+        return self.get_plugin(self.role_plugin_name(role))
 
     def keys_for(self, plugin_name: str, defaults: dict[str, str]) -> dict[str, str]:
         """Load keybindings for a plugin (see core/keys.py for semantics).

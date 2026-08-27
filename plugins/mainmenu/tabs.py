@@ -1,85 +1,81 @@
-"""Tab registry for the PIM home (see docs/build-plan.md Phase 1, Step 6).
+"""Home-strip registry for the shipped mainmenu chrome.
 
-Tabs are filtered views of the same ``core/conversations.py`` engine (or
-dashboard digest). A tab is: {id, label, kind, key, requires} where kind
-filters conversations (board|channel|dm|group|all) or is a special digest
-kind (dashboard|files|bulletins). Sysops can override via
-``plugins/mainmenu/data/tabs.json``; plugins can contribute by setting
-``pim_tab = {...}`` on their Plugin class (collected at on_load).
+The sysop lists plugin names in ``plugins/mainmenu/data/home`` (one per line).
+Order is tab order; keys 1–5 are assigned in that order. A plugin appears
+only if it is loaded AND listed. Missing plugins are skipped.
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
+import logging
 
+logger = logging.getLogger("modulo.plugins.mainmenu.tabs")
+
+DEFAULT_HOME: list[str] = ["dashboard", "social", "files", "bulletins"]
+MAX_TABS = 5
+
+# Kept so older tests/docs that mention DEFAULT_TABS still resolve a shape.
 DEFAULT_TABS: list[dict] = [
-    {"id": "dashboard", "label": "Dashboard", "kind": "dashboard", "key": "1", "requires": []},
-    {"id": "social", "label": "Social", "kind": "social", "key": "2", "requires": []},
-    {"id": "files", "label": "Files", "kind": "files", "key": "3", "requires": []},
-    {"id": "bulletins", "label": "Bulletins", "kind": "bulletins", "key": "4", "requires": []},
+    {"id": n, "label": n.title(), "kind": n, "key": str(i), "requires": []}
+    for i, n in enumerate(DEFAULT_HOME, 1)
 ]
-# B5 (boards-unification): Boards + DMs tabs replaced by the composite
-# Social surface — DMs live as its pinned sidebar row (OQ2 resolved).
-
-# Keys reserved for tab switching — never used for board selection
-# inside the PIM (that uses up/dn + enter per build-plan § Risks).
-TAB_KEYS = {t["key"] for t in DEFAULT_TABS}
 
 
-def _validate_tab(t: dict) -> dict | None:
-    if not isinstance(t, dict):
-        return None
-    for k in ("id", "label", "kind", "key"):
-        if k not in t or not isinstance(t[k], str) or not t[k].strip():
-            return None
-    if t["kind"] not in ("board", "channel", "dm", "group", "all", "dashboard", "files", "bulletins", "social"):
-        return None
-    req = t.get("requires", [])
-    if not isinstance(req, list):
-        return None
-    return {
-        "id": t["id"].strip(),
-        "label": t["label"].strip(),
-        "kind": t["kind"].strip(),
-        "key": t["key"].strip(),
-        "requires": [str(x).strip() for x in req if str(x).strip()],
-    }
+def load_home_names(bbs) -> list[str]:
+    """Plugin names for the home strip, factory default if the file is missing."""
+    path = None
+    try:
+        if bbs is not None and getattr(bbs, "storage", None) is not None:
+            path = bbs.storage.dir("mainmenu") / "home"
+    except Exception:  # noqa: BLE001
+        path = None
+    if path is not None and path.is_file():
+        try:
+            names = []
+            seen = set()
+            for raw in path.read_text(encoding="utf-8").splitlines():
+                line = raw.split("#", 1)[0].strip()
+                if not line:
+                    continue
+                name = line.split()[0].lower()
+                if name in seen:
+                    continue
+                seen.add(name)
+                names.append(name)
+            if names:
+                return names[:MAX_TABS]
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to read mainmenu home file %s", path)
+    return list(DEFAULT_HOME)[:MAX_TABS]
 
 
 def load_tabs(bbs) -> list[dict]:
-    """Load the active tab list for this BBS instance.
-
-    Precedence: DEFAULT_TABS + plugin-contributed pim_tab entries,
-    overridden entirely if ``plugins/mainmenu/data/tabs.json`` exists and
-    parses as a list.  Invalid entries are dropped (never crash boot).
-    """
-    tabs: list[dict] = [dict(t) for t in DEFAULT_TABS]
-
-    # plugin-contributed tabs (e.g. files plugin wants a Files branch)
-    try:
-        for p in getattr(bbs, "plugins", []) or []:
-            extra = getattr(p, "pim_tab", None)
-            if isinstance(extra, dict):
-                v = _validate_tab(extra)
-                if v is not None and v["id"] not in {t["id"] for t in tabs}:
-                    tabs.append(v)
-    except Exception:
-        pass
-
-    # sysop override — a JSON list of tab objects
-    try:
-        override_path = bbs.storage.dir("mainmenu") / "tabs.json"
-        if override_path.is_file():
-            raw = json.loads(override_path.read_text(encoding="utf-8"))
-            if isinstance(raw, list):
-                validated = [v for t in raw if (v := _validate_tab(t)) is not None]
-                if validated:
-                    tabs = validated
-    except Exception:
-        pass
-
-    # truncate to 5 for 80-col fit (build-plan § Risks: max tabs before wrap)
-    return tabs[:5]
+    """Active tab list: {id, label, key, requires, plugin} for loaded names."""
+    tabs: list[dict] = []
+    if bbs is None:
+        return tabs
+    get = getattr(bbs, "get_plugin", None)
+    for i, name in enumerate(load_home_names(bbs), 1):
+        plugin = get(name) if callable(get) else None
+        if plugin is None:
+            logger.warning("home lists %r but that plugin is not loaded; skipping", name)
+            continue
+        label = (getattr(plugin, "home_label", None) or "").strip() or (
+            getattr(plugin, "name", None) or name
+        )
+        req = getattr(plugin, "menu_requires", None) or []
+        if not isinstance(req, list):
+            req = []
+        tabs.append({
+            "id": name,
+            "label": str(label),
+            "kind": name,
+            "key": str(i),
+            "requires": [str(x).strip() for x in req if str(x).strip()],
+            "plugin": plugin,
+        })
+        if len(tabs) >= MAX_TABS:
+            break
+    return tabs
 
 
 def visible_tabs(tabs: list[dict], user) -> list[dict]:

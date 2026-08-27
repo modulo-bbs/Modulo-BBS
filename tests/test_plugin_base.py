@@ -42,6 +42,9 @@ class PluginBaseTest(unittest.TestCase):
         self.assertTrue(callable(p.on_session_start))
         self.assertTrue(callable(p.on_session_end))
         self.assertTrue(callable(p.handle_command))
+        self.assertTrue(callable(p.render_home_pane))
+        self.assertTrue(callable(p.handle_home_key))
+        self.assertTrue(callable(p.home_digest))
 
     def test_lifecycle_hooks_are_no_ops_by_default(self):
         p = _ConcretePlugin()
@@ -52,6 +55,9 @@ class PluginBaseTest(unittest.TestCase):
         p.on_session_end(None)
         # handle_command defaults to False (leave / pass control back).
         self.assertFalse(p.handle_command(None, "anything"))
+        self.assertEqual(p.render_home_pane(None), "")
+        self.assertFalse(p.handle_home_key(None, "ENTER"))
+        self.assertIsNone(p.home_digest(None))
         self.assertIsNone(p.on_session_start(None))
 
     def test_lifecycle_hooks_are_overrideable(self):

@@ -19,5 +19,5 @@ as formatted text; `users.list` gets a dedicated paginated table
 ## Operations surfaced
 
 Everything from `core/opdefs.py`: system health/broadcast/shutdown, session
-list/kick, full user CRUD, board/door/bulletin catalogs, chat send/names.
+list/kick, full user CRUD, board/door/bulletin catalogs.
 Run-time inventory: `GET /api/v1/_schema` (management plane).

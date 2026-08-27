@@ -2,7 +2,7 @@
 
 ## Overview
 
-Modulo uses a plugin architecture. Every feature (message boards, file areas, chat, etc.) is a plugin that registers with the core. This guide explains how to write your own plugins.
+Modulo uses a plugin architecture. Every feature (message boards, file areas, bulletins, etc.) is a plugin that registers with the core. This guide explains how to write your own plugins.
 
 ## Quick Start
 
@@ -105,8 +105,8 @@ user = await bbs.users.create("dave", "password", display_name="Dave")
 sessions = bbs.session_manager.active_sessions()
 count = len(sessions)
 
-# Server configuration from config.yaml
-sequence = bbs.config.get("logon_sequence", [])
+# Logon sequence is owned by the logon plugin, not config.yaml
+# plugins/logon/data/sequence — one screen: or plugin: line per step
 ```
 
 ## Command Handling
@@ -211,7 +211,7 @@ bbs.events.emit("myplugin:user_action", {
 def on_load(self, bbs):
     # Listen for events from other plugins
     bbs.events.on("user:login", self.handle_login)
-    bbs.events.on("chat:message", self.handle_chat)
+    bbs.events.on("messageboard:post", self.handle_post)
     
     # Listen for your own events
     bbs.events.on("myplugin:new_post", self.notify_mods)
@@ -231,8 +231,7 @@ def handle_login(self, event):
 Examples:
 user:login
 user:logout
-chat:message
-messageboard:new_post
+messageboard:post
 files:upload
 system:shutdown
 ```

@@ -10,7 +10,7 @@ import re
 from types import SimpleNamespace
 
 from core.user import User
-from plugins.mainmenu.social import render_social
+from plugins.social.social import render_social
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 

@@ -177,8 +177,8 @@ async def main():
             ssh_port = int(sys.argv[idx + 1])
             enable_ssh = True
 
-    # Build the core application object (config passed to plugins, e.g. the
-    # logon sequencer reads logon_sequence), load plugins, then wire servers.
+    # Build the core application object (config holds server bind + core
+    # role map), load plugins, then wire servers.
     bbs = BBSApp(max_nodes=max_nodes, config=config)
     bbs.plugins = await PluginLoader().load(bbs)
     # One-time migration: legacy messageboard/chat → unified conversations

@@ -1,12 +1,24 @@
 # mainmenu
 
-The main menu: the hub users return to after logon. Renders every loaded
-plugin that declares a `menu_key`, plus built-ins `[I] System Info` and
-`[Q] Disconnect`.
+The hub after logon: **tab bar + `>` prompt**. Panes belong to the plugins
+listed in this plugin's home file. Classic list (`home_mode=menu`) still
+renders every loaded plugin that declares a `menu_key`, plus `[I]` / `[Q]`.
 
-In PIM mode (default since 2026-08-24) this becomes the tabbed home:
-top tabs (branches of one surface), middle pane (filtered conversations),
-bottom `>` prompt. Classic list is still available via `home_mode=menu`.
+## Home file
+
+`plugins/mainmenu/data/home` — one plugin name per line, `#` comments, order
+is tab order (keys 1–5, cap 5). Missing file → `dashboard`, `social`,
+`files`, `bulletins`. A name whose plugin is not loaded is skipped.
+
+```
+dashboard
+social
+files
+bulletins
+```
+
+Delete a line to drop that tab. Add a third-party plugin the same way (it
+must set `home_label` and implement `render_home_pane` / `handle_home_key`).
 
 ## Screens
 
@@ -20,130 +32,30 @@ bottom `>` prompt. Classic list is still available via `home_mode=menu`.
 | Key | Values | Default | Effect |
 |---|---|---|---|
 | `home_mode` | `pim` / `menu` | `pim` | `pim` = tabbed home; `menu` = classic list |
-| `screen_mode` | `generated` / (unset) | unset | `generated` = skip skins, show generated defaults (see `docs/screens.md` `/screen` toggle) |
-| `theme` | stem of a `themes/*.theme` file | `classic` | named colour palette; drop a file to add one (`docs/themes.md`) |
+| `screen_mode` | `generated` / (unset) | unset | `generated` = skip skins, show generated defaults |
+| `theme` | stem of a `themes/*.theme` file | `classic` | named colour palette (`docs/themes.md`) |
 
-Switch at runtime: at the home `>` prompt press `/`, type `theme`, Enter —
-up/down picker, overlay previews the highlight, Enter saves, ESC cancels.
-`theme amber` still sets a name without the picker. `/` then `help` lists
-commands (no second slash). Palettes are files in `themes/` (`docs/themes.md`).
-Classic vs PIM is stored in
-`home_mode` (set via `users.update` or a future `/home` command — currently
-manual via prefs; the menu respects it immediately).
+At the `>` prompt press `/`, type a command, Enter. Bare `theme` opens the
+modal picker. Other commands paint in a notice overlay; any key dismisses.
 
-## Tabs (boards-unification B5/B7)
+## Keys (PIM)
 
-Default tabs (**Dashboard | Social | Files | Bulletins**), declared in
-`plugins/mainmenu/tabs.py` as `DEFAULT_TABS`. Each tab:
+- `1`/`2`/`3`/`4`/`5` and `LEFT`/`RIGHT` / `H`/`L` — switch tab
+- Remaining keys go to the active home plugin (Social chat, Files list, …)
+- `/` — slash command
+- `Q` — disconnect; `I` — system info; `X` — shutdown (sysop, classic or fall-through)
 
-```python
-{"id": "social", "label": "Social", "kind": "board", "key": "2", "requires": []}
-```
+## Configuration (classic mode)
 
-- `kind` filters `conversations.list` (`board|channel|dm|group|all`) — Social is
-  the composite tab (board rooms + DMs pinned on top)
-- `requires` is a group gate via `user.can_access()` — hidden unless caller qualifies
-- `key` is the digit that activates the tab — capped at 5 tabs for 80-col fit
-
-Sysop override: `plugins/mainmenu/data/tabs.json` (JSON list of tab objects) replaces
-the default set entirely when present. Plugin-contributed tabs: set `pim_tab = {...}`
-on any `Plugin` class; collected at `on_load` and appended (no duplicates).
-
-Visible-tab check: `visible_tabs(load_tabs(bbs), user)` respects the gate;
-anonymous sees only `requires=[]` tabs.
-
-Keys inside the PIM (numbers reserved for tabs — selection uses up/dn+Enter):
-- `1`/`2`/`3`/`4` (and `LEFT`/`RIGHT` / `H`/`L`) → switch tab, reset highlight to 0
-- `UP`/`K` , `DOWN`/`J` → move highlight inside pane
-- `ENTER` → Social: enter the highlighted room's chat (B8); other tabs: open
-  the full-screen reader
-- Social pane: `N` new thread (title ≤15; empty/whitespace silently aborts —
-  no conversation, no cancelled banner). There is no `+ new thread` sidebar
-  row; DMs is the pinned aggregate, then a separator, then rooms.
-- `/` then a command + Enter → slash commands (`theme`, `theme amber`,
-  `screen`, `ver`, `help`). The `>` is a **single-key** prompt, not a shell: the
-  `/` is the hotkey; type the rest and press Enter. Bare `theme` opens an
-  up/down overlay picker (Enter applies, ESC cancels; the box previews the
-  highlighted palette). Other commands paint in a bordered overlay; any
-  key dismisses, then the tabs redraw.
-
-The Social two-pane must leave a row for the tab bar and a row for the `>`
-prompt on 80×24; filling the screen used to scroll `Dashboard | Social | …`
-off the top of SyncTERM.
-
-## Social chat (B8, Dave's Telegram-style surface)
-
-ENTER on a Social room opens a full-screen chat. Bubbles are **me vs
-everyone else**, not per-person colors: your messages sit **right / accent**,
-every other author sits **left / success** (tell people apart by the name in
-the title bar). Classic theme is cyan / green; `/theme` switches the palette.
-`*NEW*` (warning colour; yellow in classic) marks other people's messages that arrived
-after you entered the room. Tail-anchored entry; 1s polling so other nodes
-appear live. Keys:
-
-| Key | Action |
-|---|---|
-| printable / `SPACE` | type into the draft (echo painted by the box) |
-| `ENTER` | post the draft |
-| `Ctrl-Enter` (LF) | insert a newline — the input box word-wraps and grows upward over bubbles (capped; tall drafts collapse to `[N lines - Ctrl-E to view]` + last 2 rows) |
-| `Ctrl-E` | overlay notepad editor (see below) |
-| `UP`/`DOWN` | scroll history (tail-anchored) |
-| `PgUp`/`PgDn`/`SPACE`* | page history (*Space aliases PgDn only when the draft is empty) |
-| `ESC` | back to the Social pane (marks the room read) |
-
-SyncTERM key facts (hex-captured 2026-08-25): plain Enter sends CR (CRLF on the
-wire — the trailing LF is swallowed), Shift-Enter is byte-identical to Enter,
-**Ctrl-Enter sends LF**, Ctrl-E sends 0x05, Ctrl-S sends 0x13.
-
-### Overlay notepad editor (`Ctrl-E`)
-
-A themed (success-colour) bordered box overlays the live chat; the draft renders inside it
-from the top with soft wrap. Notepad-style caret editing: arrows move the caret
-anywhere in the box, `Enter` opens a line, `Backspace` joins, typing inserts at
-the caret. Capacity is hard-capped to the box (an edit that would not fit is
-refused — it never scrolls). Bottom border: `Ctrl-S save / ESC cancel`.
-
-| Key | Action |
-|---|---|
-| `Ctrl-S` (or `Ctrl-Enter`) | save/send. Blank and whitespace-only lines collapse to single spacing so a pile of Enters cannot pad a tall empty bubble. |
-| `ESC` | cancel — discard overlay edits, restore the chat-box draft, go back |
-| `Ctrl-E` | return to the chat input keeping the current overlay text (does not send) |
-
-Reader (non-Social tabs): paged, threaded (`parent_id` indented), `F`ind,
-`R`eply (classic `/S` save `/A` abort line editor), `D`elete (own or mod),
-`N`/`P` paging, `Q` back to tabs. `R`/`D` are retired on Social — messaging
-lives in the chat.
-
-## Keys
-
-Handled by this plugin (not in a `keys` file — they're structural):
-- `Q` / `EXIT`… — disconnect
-- `I` — system info block
-- `X` — graceful shutdown (**sysop only**; the option only renders for sysops)
-- any plugin's `menu_key` (`M`, `F`, `D`, `B`, `C`, `S`, …) — only in classic `menu` mode; PIM replaces them with tabs
-- PIM navigation keys above — only in `pim` mode
-
-## Configuration
-
-Per-plugin menu entries come from each plugin's metadata (classic mode only):
+Per-plugin menu entries come from each plugin's metadata:
 
 | Attribute | Meaning |
 |---|---|
-| `menu_label` | Display text, e.g. `[M] Message Boards` |
-| `menu_key` | Hotkey letter; empty = not on the menu |
+| `menu_label` | Display text, e.g. `[F] Files` |
+| `menu_key` | Hotkey letter; empty = not on the classic menu |
 | `menu_order` | Sort position (lower first) |
-| `menu_requires` | Group gate — entry hidden unless caller can access |
-
-## Tokens available in `main.*` / `pim.*`
-
-All standard tokens (`{username}`, `{time}`, `{node}`, `{active}` …) work plus
-`{unread}` / `{mentions}` backed by `bbs.conversations` (when available).
-See `docs/screens.md` for the full vocabulary.
-
-A screen is display only — showing `[X] Shutdown` doesn't make it available;
-the dispatcher still rejects unauthorized keys.
+| `menu_requires` | Group gate |
 
 ## Data
 
-- `plugins/mainmenu/data/tabs.json` — optional sysop tab override (not versioned)
-- No other data files; conversations live under `plugins/conversations/data/`.
+- `plugins/mainmenu/data/home` — home strip (shipped default; edit to taste)

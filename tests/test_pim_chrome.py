@@ -32,12 +32,20 @@ def _app(tmp_path: Path) -> BBSApp:
     app.storage.plugins_dir = tmp_path / "plugins"
     app.screens.plugins_root = tmp_path
     from core.conversations import Conversations
+    from plugins.bulletins import BulletinsPlugin
+    from plugins.dashboard import DashboardPlugin
+    from plugins.files import FilesPlugin
     from plugins.mainmenu import MainmenuPlugin
+    from plugins.modal import ModalPlugin
+    from plugins.social import SocialPlugin
 
     app.conversations = Conversations(app)
-    p = MainmenuPlugin()
-    p.on_load(app)
-    app.plugins = [p]
+    loaded = []
+    for cls in (ModalPlugin, DashboardPlugin, SocialPlugin, FilesPlugin, BulletinsPlugin, MainmenuPlugin):
+        inst = cls()
+        inst.on_load(app)
+        loaded.append(inst)
+    app.plugins = loaded
     return app
 
 

@@ -149,9 +149,13 @@ the palette.
 Plugins are discovered automatically: the loader scans `plugins/*/` and loads
 every `__init__.py` that exports a `Plugin` subclass. A plugin that fails to
 import or raises during load is logged and skipped — one broken plugin never
-prevents startup. There is no `plugins.enabled` list; to remove a plugin from
-the board, remove its directory (or move it out of `plugins/`). Restart the
-server after changes.
+prevents startup. There is no `plugins.enabled` list.
+
+Core jobs (`login`, `logon`, `mainmenu`, `modal`) are mapped in `config.yaml`
+(`modal: modal`). Swap a folder with one line. The home tabs (Dashboard,
+Social, Files, Bulletins) are listed in `plugins/mainmenu/data/home` — delete
+a line to drop that tab. The logon order is `plugins/logon/data/sequence`.
+Restart after changes.
 
 ### HTTP Control API (shipped)
 
@@ -206,8 +210,8 @@ plugins/
 Social rooms are `kind=board` conversations. Sysops manage messages through the
 One-API ops (`conversations.*`, with `boards.*` shims) — see `docs/one-api.md`;
 in-app, Social rooms are the Telegram-style chat (see
-`plugins/mainmenu/docs/README.md` for the key map: overlay notepad is
-Ctrl-E, Ctrl-S save / ESC cancel).
+`plugins/mainmenu/docs/README.md` for the key map: one-line prompt, Enter
+opens Post / Editor / Discard, empty Enter or wrap opens the notepad, ESC back).
 
 ## Monitoring
 
@@ -248,7 +252,7 @@ When all nodes are full, new connections get "All nodes busy" and are disconnect
 ### What to Back Up
 
 - `users/` — all user accounts (one JSON file per user)
-- `plugins/*/data/` — plugin runtime data (messages, uploads, chat logs)
+- `plugins/*/data/` — plugin runtime data (messages, uploads)
 - `keys/` — SSH host keys (regenerate if lost, but clients will need to re-accept)
 - `config.yaml` — server configuration
 

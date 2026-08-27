@@ -4,7 +4,7 @@
 
 ## Overview
 
-Modulo BBS uses a plugin-based architecture. Every feature (message boards, file areas, chat, etc.) is a plugin that registers with the core. The core provides session management, user model, event bus, and transport. Plugins provide everything else.
+Modulo BBS uses a plugin-based architecture. Every feature (message boards, file areas, bulletins, etc.) is a plugin that registers with the core. The core provides session management, user model, event bus, and transport. Plugins provide everything else.
 
 ## Design Principles
 
@@ -171,7 +171,6 @@ bbs.events.off("user:login", handle_login)
 | `messageboard:reply` | messageboard | `{session, reply, parent}` |
 | `files:upload` | files | `{session, filename, size}` |
 | `files:download` | files | `{session, filename}` |
-| `chat:message` | chat | `{session, channel, message}` |
 | `auth:register` | auth | `{session, user}` |
 | `auth:login_failed` | auth | `{session, username, reason}` |
 
@@ -205,6 +204,7 @@ class Plugin:
     menu_label: str        # Display text ("[M] Message Board")
     menu_key: str          # Hotkey ("M")
     menu_order: int        # Sort order in main menu (lower = higher)
+    home_label: str        # Tab text when listed in mainmenu's home file
     
     def on_load(self, bbs):
         """Called once at startup. Register event handlers."""
@@ -226,7 +226,21 @@ class Plugin:
         """Handle a command while this plugin is active.
         Return True to stay in plugin, False to return to menu."""
         pass
+
+    def render_home_pane(self, session) -> str:
+        """Middle pane when this plugin is listed in mainmenu's home file."""
+        return ""
+
+    def handle_home_key(self, session, key) -> bool:
+        """Key while this plugin's home tab is active. True = consumed."""
+        return False
+
+    def home_digest(self, session):
+        """Optional dashboard row(s): (text, jump_plugin_id) or a list of those."""
+        return None
 ```
+
+The shipped mainmenu is chrome: tab bar + `>` prompt. It reads `plugins/mainmenu/data/home` (one plugin name per line) and delegates the pane. A plugin appears on the strip only if it is loaded **and** listed. `home_label` is the tab text.
 
 ### Plugin Lifecycle
 
@@ -468,50 +482,54 @@ server:
   ssh_port: 6422       # SSH off unless --ssh / --ssh-port given
   max_nodes: 8
 
-logon_plugin: logon     # which plugin orchestrates the logon flow
-
-logon_sequence:         # see "Logon Sequence" below
-  - screen:splash.txt
-  - plugin:login
-  - screen:welcome.txt
-  - plugin:bulletins
-  - plugin:mainmenu
+# Core roles — which plugin directory fills each job. Omit a line to use
+# the role name as the folder. Callers use bbs.plugin_for("modal"), not a
+# hard-coded directory.
+login: login
+logon: logon
+mainmenu: mainmenu
+modal: modal
 
 api:                    # HTTP control API (see SysOp Guide)
   enabled: false
   host: "127.0.0.1"
   port: 8080
 
-# Plugins read their own sections from bbs.config, e.g. a plugin named
-# "messageboard" may look for config["messageboard"]. There is no global
-# plugins.enabled list — the loader auto-discovers plugins/ subdirectories.
+# The logon sequence lives in plugins/logon/data/sequence (owned by logon).
+# The home tab strip lives in plugins/mainmenu/data/home (owned by mainmenu).
+# There is no global plugins.enabled list — the loader auto-discovers
+# plugins/ subdirectories.
 ```
 
 ## Logon Sequence (Sysop-Configurable)
 
 The order of what a caller sees — splash screens, login, bulletins, menu — is
 data, not code. And the sequencer itself is **just another plugin**: it reads
-`logon_sequence` from config and executes steps. Everything in the sequence is
+`plugins/logon/data/sequence` and executes steps. Everything in the sequence is
 pluggable; there is no `built-in` step type.
 
-```yaml
-logon_plugin: logon            # which plugin orchestrates the logon flow
-
-logon_sequence:                # read by the logon plugin
-  - screen:splash.txt          # sysop splash (MODULO blockletters lives here)
-  - plugin:login               # auth + optional TOTP
-  - screen:welcome.txt         # welcome mat
-  - plugin:bulletins           # new-since-last-call (skips itself if nothing new)
-  - plugin:mainmenu            # the menu is just another plugin
 ```
+# plugins/logon/data/sequence
+screen:splash.txt
+plugin:login
+screen:welcome.txt
+plugin:bulletins
+plugin:mainmenu
+```
+
+`plugin:<role>` resolves through the core role map (`bbs.plugin_for`), so
+`plugin:mainmenu` follows `mainmenu:` in config.yaml.
 
 ### Core-plugins
 
 **Core-plugins** are the plugins Modulo ships with that the board needs to
-operate: `login`, `logon` (sequencer), and `mainmenu`. They are ordinary
-plugins — same base class, same directory layout, same rules, replaceable like
-any other plugin — but a board without them has no authentication and no menu,
-so they ship enabled by default.
+operate: `login`, `logon` (sequencer), `mainmenu` (chrome + prompt), and
+`modal` (pickers). They are ordinary plugins — same base class, same
+directory layout, same rules, replaceable like any other plugin — but a board
+without them has no authentication, no menu, and no overlay picker, so they
+ship enabled by default. Swap a folder with one line in config.yaml
+(`modal: awesomemodal`). Social, files, bulletins, and dashboard are
+**optional** home tabs listed in `plugins/mainmenu/data/home`, not core roles.
 
 The distinction is about packaging and support, not privilege:
 
@@ -542,13 +560,13 @@ login? Add two `screen:` lines. Don't want bulletins? Delete the line.
 Consistency: the runner is pure orchestration — read a list, call each thing,
 emit events. It needs no special privileges, so it gets none. The payoff is
 that the *entire* logon experience is swappable: a sysop can point
-`logon_plugin:` at any orchestrator — a wizard-style onboarding, straight-to-
+the `logon` role at any orchestrator — a wizard-style onboarding, straight-to-
 chat, kiosk mode — without touching core.
 
 ### What stays in core (and why)
 
 1. **The bootstrap hook.** Something must run first. After transport
-   handshake, core invokes the plugin named by `logon_plugin:` — one identical
+   handshake, core invokes `bbs.plugin_for("logon")` — one identical
    line per transport. This avoids infinite regress (who runs the runner?)
 2. **Graceful failure.** Missing or broken logon plugin → core displays a
    minimal "system unavailable" notice and closes cleanly. Never hangs.
@@ -578,7 +596,7 @@ directly, so a buggy plugin can always be cleaned up reliably by core.
 2. Event bus ✓
 3. User model + storage ✓
 4. Login plugin ✓
-5. Logon sequencer plugin + core bootstrap hook (`logon_plugin:` config)
+5. Logon sequencer plugin + core bootstrap hook (`logon` role)
 6. Mainmenu plugin (extract from server.py)
 7. Message board plugin
 8. File transfer plugin

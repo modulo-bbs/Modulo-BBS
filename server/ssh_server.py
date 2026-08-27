@@ -8,9 +8,9 @@ After the SSH handshake the session bridges the asyncssh channel to a shared
 :class:`server.session.Session` object (providing ``reader`` / ``writer`` so
 ``bbs.send`` and the plugin line-reading terminals work unchanged over SSH).
 Like the telnet server, it then invokes the core bootstrap hook
-(:func:`core.runner.run_bootstrap`), handing the session to the configured
-``logon_plugin`` (the ``logon`` sequencer) which drives the whole logon flow --
-splash, login, welcome, menu -- identically over SSH.
+(:func:`core.runner.run_bootstrap`), handing the session to the plugin
+filling the ``logon`` role (the ``logon`` sequencer by default) which drives
+the whole logon flow -- splash, login, welcome, menu -- identically over SSH.
 """
 
 import asyncio

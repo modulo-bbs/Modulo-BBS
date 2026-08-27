@@ -425,7 +425,7 @@ async def run_plugin_flow(bbs, plugin, session) -> bool:
 
 
 async def run_bootstrap(bbs, session) -> None:
-    """Core bootstrap hook: invoke the configured ``logon_plugin``.
+    """Core bootstrap hook: invoke the plugin filling the ``logon`` role.
 
     Every transport calls this once per session after the protocol handshake.
     It fires ``session:connect``, then awaits the logon plugin's
@@ -433,8 +433,8 @@ async def run_bootstrap(bbs, session) -> None:
     "System unavailable." notice and closes the session via ``bbs.disconnect``
     -- never hangs.
     """
-    name = (bbs.config or {}).get("logon_plugin", "logon")
-    plugin = bbs.get_plugin(name)
+    plugin = bbs.plugin_for("logon")
+    name = bbs.role_plugin_name("logon")
     bbs.events.emit("session:connect", {"session": session})
 
     if plugin is None:

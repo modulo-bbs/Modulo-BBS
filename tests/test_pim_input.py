@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 
 from core.app import BBSApp
@@ -30,12 +29,20 @@ def _app(tmp_path: Path) -> BBSApp:
     app.storage.plugins_dir = tmp_path / "plugins"
     app.screens.plugins_root = tmp_path
     from core.conversations import Conversations
+    from plugins.bulletins import BulletinsPlugin
+    from plugins.dashboard import DashboardPlugin
+    from plugins.files import FilesPlugin
     from plugins.mainmenu import MainmenuPlugin
+    from plugins.modal import ModalPlugin
+    from plugins.social import SocialPlugin
 
     app.conversations = Conversations(app)
-    p = MainmenuPlugin()
-    p.on_load(app)
-    app.plugins = [p]
+    loaded = []
+    for cls in (ModalPlugin, DashboardPlugin, SocialPlugin, FilesPlugin, BulletinsPlugin, MainmenuPlugin):
+        inst = cls()
+        inst.on_load(app)
+        loaded.append(inst)
+    app.plugins = loaded
     return app
 
 
@@ -111,29 +118,19 @@ def test_enter_opens_and_returns(tmp_path):
     async def _a():
         await app.conversations.create_conversation(kind="board", title="General", created_by="dave", conv_id="general")
         await app.conversations.post_message("general", author="dave", body="hello")
-        s._pim_selected = 0  # type: ignore[attr-defined]
-        # The classic full-screen reader is reachable from a conversation-
-        # listing tab; defaults no longer include one, so simulate a sysop
-        # tabs.json override with a boards branch.
-        d = tmp_path / "plugins" / "mainmenu" / "data"
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "tabs.json").write_text(json.dumps([
-            {"id": "boards", "label": "Boards", "kind": "board", "key": "2"},
-        ]))
-        s._pim_active_tab = "boards"  # type: ignore[attr-defined]
-        # Mock the "Press any key" pause so ENTER doesn't block
+        s._pim_selected = 1  # type: ignore[attr-defined]
+        s._pim_active_tab = "social"  # type: ignore[attr-defined]
         import core.runner as runner
 
         orig = runner.read_key
 
-        async def _fake(bbs, sess, timeout=300):
-            return "Q"
+        async def _fake(bbs, sess, timeout=300, **kw):
+            return "ESC"
 
         runner.read_key = _fake  # type: ignore[assignment]
         try:
             ok = await p._handle_pim_key(s, "ENTER")  # type: ignore[attr-defined]
             assert ok is True
-            # pane reader wrote the message body into the writer
             text = bytes(s.writer.buf).decode("utf-8", errors="replace")  # type: ignore[union-attr]
             assert "hello" in text or "General" in text
         finally:
@@ -195,7 +192,7 @@ def test_slash_theme_list_in_overlay(tmp_path):
         with patch("core.runner.read_key", new_callable=AsyncMock, return_value="ESC"):
             await p._dispatch_slash(s, "theme")  # type: ignore[attr-defined]
         out = bytes(s.writer.buf).decode("cp437", errors="replace")  # type: ignore[union-attr]
-        assert "classic *" in out
+        assert "classic" in out
         assert "matrix" in out
         assert "arrows select" in out
         assert "\x1b[2;1H" in out

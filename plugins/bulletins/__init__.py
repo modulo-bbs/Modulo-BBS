@@ -22,6 +22,7 @@ class BulletinsPlugin(Plugin):
     menu_label = "[B] Bulletins"
     menu_key = "B"
     menu_order = 40
+    home_label = "Bulletins"
 
     def __init__(self):
         self.bbs = None
@@ -33,6 +34,35 @@ class BulletinsPlugin(Plugin):
         self.bbs = bbs
         self._keys = bbs.keys_for("bulletins", DEFAULT_KEYS)
         self._data_dir()
+
+    async def render_home_pane(self, session) -> str:
+        from plugins.mainmenu import list_pane
+
+        vis = self.visible_for(getattr(session, "user", None))
+        items = [b["title"] for b in vis]
+        return list_pane(
+            self.bbs, session, items,
+            "  Enter reads bulletins, arrows switch tabs, Q disconnects",
+        )
+
+    async def handle_home_key(self, session, key: str) -> bool:
+        if key != "ENTER":
+            return False
+        await self.run_menu(session)
+        return True
+
+    def home_digest(self, session):
+        from plugins.mainmenu import _elided
+
+        user = getattr(session, "user", None)
+        if user is None:
+            return ("Bulletins: (no new)", "bulletins")
+        ids = self.unseen(user)
+        if ids:
+            vis = {b["id"]: b for b in self.scan()}
+            titles = [vis.get(i, {"title": i})["title"] for i in ids[:8]]
+            return (_elided(f"Bulletins: ({len(ids)} new) ", titles, sep=" | ", width=74), "bulletins")
+        return ("Bulletins: (no new)", "bulletins")
 
     def _data_dir(self) -> Path:
         d = self.bbs.storage.dir("bulletins")
@@ -62,7 +92,14 @@ class BulletinsPlugin(Plugin):
         return out
 
     def visible_for(self, user) -> list[dict]:
-        return [b for b in self.scan() if user.can_access(b["requires"])]
+        out = []
+        for b in self.scan():
+            req = b.get("requires") or []
+            if not req:
+                out.append(b)
+            elif user is not None and user.can_access(req):
+                out.append(b)
+        return out
 
     def get(self, bulletin_id: str) -> str | None:
         p = self._content_dir() / f"{bulletin_id}.txt"

@@ -1,0 +1,7 @@
+# Home strip — one plugin name per line. Order is tab order (keys 1–5).
+# Delete a line to drop that feature. Add a third-party plugin the same way.
+# Comments start with #.
+dashboard
+social
+files
+bulletins

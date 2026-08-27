@@ -24,6 +24,7 @@ class FilesPlugin(Plugin):
     menu_label = "[F] Files"
     menu_key = "F"
     menu_order = 20
+    home_label = "Files"
 
     def __init__(self):
         self.bbs = None
@@ -39,7 +40,48 @@ class FilesPlugin(Plugin):
         self.keys = bbs.keys_for("files", DEFAULT_KEYS)
 
     def visible_areas(self, user) -> list[dict]:
-        return [a for a in self.areas if user.can_access(a.get("requires", []))]
+        out = []
+        for a in self.areas:
+            req = a.get("requires", []) or []
+            if not req:
+                out.append(a)
+            elif user is not None and user.can_access(req):
+                out.append(a)
+        return out
+
+    async def render_home_pane(self, session) -> str:
+        from plugins.mainmenu import list_pane
+
+        vis = self.visible_areas(getattr(session, "user", None))
+        items = [a.get("name", a["id"]) for a in vis]
+        return list_pane(
+            self.bbs, session, items,
+            "  Enter opens file areas, arrows switch tabs, Q disconnects",
+        )
+
+    async def handle_home_key(self, session, key: str) -> bool:
+        if key != "ENTER":
+            return False
+        await self.on_session_start(session)
+        return True
+
+    def home_digest(self, session):
+        from plugins.mainmenu import _elided
+
+        user = getattr(session, "user", None)
+        areas = self.visible_areas(user) if user else []
+        total = 0
+        names = []
+        for a in areas:
+            try:
+                n = len(self.store.list_files(a["id"])) if self.store else 0
+                total += n
+                names.append(a.get("name", a["id"]))
+            except Exception:
+                pass
+        if total:
+            return (_elided(f"Files: ({total} new) ", names, sep=" | ", width=74), "files")
+        return ("Files: (no new)", "files")
 
     async def on_session_start(self, session) -> bool:
         while getattr(session, "is_active", True):

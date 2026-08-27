@@ -78,21 +78,25 @@ def run_emitting(coro):
 
 
 def make_app(tmp_path):
-    """Bare BBSApp bound to a throwaway users dir."""
-    return BBSApp(users_dir=tmp_path / "users")
+    """Bare BBSApp bound to a throwaway users dir and plugins tree."""
+    app = BBSApp(users_dir=tmp_path / "users")
+    app.storage.plugins_dir = tmp_path / "plugins"
+    return app
 
 
 def make_logon(app, tmp_path, sequence):
-    """Build a loaded LogonPlugin wired to config + a throwaway screens dir.
+    """Build a loaded LogonPlugin wired to a throwaway screens dir.
 
-    Points the core screen service's logon dir at the throwaway location so
+    Writes ``plugins/logon/data/sequence`` in the app's storage tree and
+    points the core screen service's logon dir at the throwaway location so
     screen steps read from tmp (not the project-root screens/).
     """
     screens = tmp_path / "screens"
     screens.mkdir(exist_ok=True)
     (screens / "a.txt").write_bytes(b"AAA\r\n")
     (screens / "b.txt").write_bytes(b"BBB\r\n")
-    app.config["logon_sequence"] = list(sequence)
+    seq_path = app.storage.dir("logon") / "sequence"
+    seq_path.write_text("\n".join(sequence) + "\n", encoding="utf-8")
     logon = LogonPlugin()
     logon.on_load(app)
     logon.screens_dir = screens
@@ -129,11 +133,12 @@ def test_default_sequence_when_config_missing(tmp_path):
     app = make_app(tmp_path)
     p = LogonPlugin()
     p.on_load(app)
-    # No logon_sequence configured -> ship the default splash/login/menu flow.
+    # No sequence file -> ship the default splash/login/bulletins/menu flow.
     assert p._sequence() == [
         "screen:splash.txt",
         "plugin:login",
         "screen:welcome.txt",
+        "plugin:bulletins",
         "plugin:mainmenu",
     ]
 
@@ -242,6 +247,27 @@ def test_sequencer_preserves_crlf_in_screen_bytes(tmp_path):
     assert b"\r\n" in out          # CRLF survives reading/decoding screens
 
 
+def test_sequencer_plugin_step_follows_role_map(tmp_path):
+    app = make_app(tmp_path)
+    calls = []
+
+    class Classic(Plugin):
+        name = "classicmenu"
+
+        async def on_session_start(self, session):
+            calls.append("classic")
+            session.authenticated = True
+            return True
+
+    logon = make_logon(app, tmp_path, ["plugin:mainmenu"])
+    app.config["mainmenu"] = "classicmenu"
+    app.plugins = [logon, Classic()]
+
+    s = make_session()
+    run(logon.on_session_start(s))
+    assert calls == ["classic"]
+
+
 def test_aborted_auth_step_ends_sequence(tmp_path):
     app = make_app(tmp_path)
 
@@ -269,7 +295,7 @@ def test_aborted_auth_step_ends_sequence(tmp_path):
 def test_bootstrap_missing_logon_plugin_notices_and_closes(tmp_path):
     app = make_app(tmp_path)
     app.plugins = []                          # nothing loaded
-    app.config["logon_plugin"] = "no_such_plugin"
+    app.config["logon"] = "no_such_plugin"
 
     s = make_session()
     run(run_bootstrap(app, s))

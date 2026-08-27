@@ -1,19 +1,19 @@
 # logon
 
-Runs the sysop-configurable logon sequence, one step at a time, from
-`config.yaml`:
+Runs the logon sequence, one step at a time, from **`plugins/logon/data/sequence`**
+(owned by this plugin, not `config.yaml`):
 
-```yaml
-logon_sequence:
-  - screen:splash.txt
-  - plugin:login
-  - screen:welcome.txt
-  - plugin:mainmenu
+```
+screen:splash.txt
+plugin:login
+screen:welcome.txt
+plugin:bulletins
+plugin:mainmenu
 ```
 
-Step types: `screen:<file>` (display a screen) and `plugin:<name>` (run that
-plugin's session flow). Unknown steps are logged and skipped; the sequence
-never crashes the board.
+`plugin:<role>` follows the core role map in `config.yaml` (`mainmenu: mainmenu`).
+Unknown steps are logged and skipped; the sequence never crashes the board.
+Missing file → factory default (same four steps plus bulletins).
 
 ## Screens
 

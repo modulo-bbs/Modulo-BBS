@@ -50,7 +50,6 @@ modulo-bbs/
 │   ├── messageboard/        # Multi-board message base + threads
 │   ├── files/               # File area catalog (transfers: future)
 │   ├── bulletins/           # Sysop notices, new-since-last-call at logon
-│   ├── chat/                # Inter-node live chat
 │   ├── doors/               # Door game catalog (launching: future)
 │   └── api/                 # HTTP control API (health/sessions/shutdown/broadcast)
 ├── server/                  # Transports + session plumbing
@@ -124,7 +123,6 @@ definitions now):
 Main Menu
 ├── [F] Files            → plugin: files
 ├── [B] Bulletins        → plugin: bulletins
-├── [C] Chat             → plugin: chat
 ├── [D] Doors            → plugin: doors
 ├── [I] System Info      → built into mainmenu
 ├── [X] Shutdown         → built into mainmenu (sysop group only, Y/N confirm)
@@ -140,7 +138,7 @@ Publish/subscribe system for inter-module communication. Plugins emit events and
 bbs.events.emit("user:login", {"user": user, "session": session})
 
 # Listen for events
-bbs.events.on("chat:message", handle_chat_message)
+bbs.events.on("user:logout", handle_logout)
 ```
 
 Events are async — handlers run in the event loop.
@@ -213,8 +211,7 @@ users/                        # Core-owned: one JSON file per account
 plugins/
 ├── login/data/               # Plugin-owned: each plugin's runtime data
 ├── messageboard/data/        #   (boards.json, posts/, ...)
-├── files/data/               #   (uploads/, ...)
-└── chat/data/                #   (chat logs, ...)
+└── files/data/               #   (uploads/, ...)
 ```
 
 Plugins get their data directory via `bbs.storage.dir(plugin_name)` (a
@@ -302,23 +299,17 @@ server:
   ssh_port: 6422       # SSH enabled by --ssh or --ssh-port flag
   max_nodes: 8
 
-logon_plugin: logon
-
-logon_sequence:
-  - screen:splash.txt
-  - plugin:login
-  - screen:welcome.txt
-  - plugin:bulletins
-  - plugin:mainmenu
+login: login
+logon: logon
+mainmenu: mainmenu
+modal: modal
 
 api:                   # HTTP control API, off by default
   enabled: false
   host: "127.0.0.1"
   port: 8080
-  # keys:
-  #   - name: "admin"
-  #     key: "replace-with-a-real-secret"
 ```
 
 There is no `plugins.enabled` list — the loader auto-discovers every
-`plugins/<name>/__init__.py`.
+`plugins/<name>/__init__.py`. The logon sequence is `plugins/logon/data/sequence`.
+The home tab strip is `plugins/mainmenu/data/home`.

@@ -1,7 +1,7 @@
 """
 Plugin base class — the interface contract every Modulo BBS plugin implements.
 
-A plugin is a self-contained component (message board, file area, chat, auth
+A plugin is a self-contained component (message board, file area, bulletin, auth
 flow, door game, ...) that registers with the core. This class defines the
 shape a plugin must present; subclasses override the class attributes and
 lifecycle hooks as needed. The class is intentionally dependency-free so it
@@ -22,6 +22,12 @@ Attributes
 
     ``menu_label`` and ``menu_order`` default to sensible values if a plugin
     overrides them; ``name`` and ``version`` must be provided.
+
+    Optional home-strip attributes (used by the shipped mainmenu chrome)::
+
+        home_label   tab text when this plugin is listed in mainmenu's home file
+        render_home_pane / handle_home_key / home_digest
+                     see the method docs below; defaults are no-ops
 
 Lifecycle
     The core drives a plugin through its lifecycle:
@@ -69,6 +75,8 @@ class Plugin:
     # Group gate for appearing in menus at all (evaluated with
     # user.can_access(); empty/None = visible to everyone).
     menu_requires: list[str] | None = None
+    # Tab text when listed in plugins/mainmenu/data/home. Empty = use ``name``.
+    home_label: str = ""
 
     def on_load(self, bbs: Any) -> "None | Awaitable[None]":
         """Called once at startup. Register event handlers and resources.
@@ -113,3 +121,28 @@ class Plugin:
             True to stay in the plugin, False to return to the menu.
         """
         return False
+
+    def render_home_pane(self, session: Any) -> "str | Awaitable[str]":
+        """Middle pane for the shipped mainmenu chrome (no tab row, no prompt).
+
+        Return the pane text, or ``""`` if this plugin has no home view.
+        """
+        return ""
+
+    def handle_home_key(
+        self, session: Any, key: str
+    ) -> "bool | Awaitable[bool]":
+        """Handle a key while this plugin's home tab is active.
+
+        Tab switch, ``/``, and ``Q`` never reach here. Return True if the
+        key was consumed.
+        """
+        return False
+
+    def home_digest(self, session: Any) -> Any:
+        """Optional dashboard rows: ``(text, jump_id)`` or a list of those.
+
+        ``jump_id`` is a plugin name the dashboard Enter key should open.
+        Return None if this plugin has nothing to summarize.
+        """
+        return None

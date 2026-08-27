@@ -209,7 +209,7 @@ async def render_social(conversations, session) -> str:
             pass
     new_from = int(seen.get(cur_id, 0) or 0)
 
-    from plugins.mainmenu.bubbles import render_bubbles as _render_bubbles
+    from plugins.social.bubbles import render_bubbles as _render_bubbles
 
     up = max(0, int(up or 0))
     pane_rows_all: list[str] = []

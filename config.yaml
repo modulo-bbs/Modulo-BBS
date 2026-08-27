@@ -8,12 +8,11 @@
 #   ssh_port:     SSH listen port
 #   max_nodes:    maximum concurrent nodes
 #
-# logon_plugin:   which plugin orchestrates the logon flow (a core-plugin)
+# Core roles — which plugin directory fills each job. Omit a line to use
+# the role name as the folder (login: login). Swap a folder with one line.
 #
-# logon_sequence: read by the logon plugin. Each line is a step:
-#                   screen:<file>   display screens/<file>, no input
-#                   plugin:<name>   run the named plugin's session flow
-#   Sysops may reorder / remove / duplicate steps freely.
+# The logon sequence lives in plugins/logon/data/sequence (owned by logon).
+# The home tab strip lives in plugins/mainmenu/data/home (owned by mainmenu).
 
 server:
   host: "127.0.0.1"
@@ -21,14 +20,10 @@ server:
   ssh_port: 6422
   max_nodes: 8
 
-logon_plugin: logon
-
-logon_sequence:
-  - screen:splash.txt
-  - plugin:login
-  - screen:welcome.txt
-  - plugin:bulletins
-  - plugin:mainmenu
+login: login
+logon: logon
+mainmenu: mainmenu
+modal: modal
 
 # HTTP control API (health, sessions, shutdown, broadcast).
 # Disabled by default — set enabled: true to start the API server.
