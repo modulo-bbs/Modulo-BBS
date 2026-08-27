@@ -1,4 +1,4 @@
-"""Social home-tab plugin: Telegram-style rooms and chat."""
+"""Social home-tab plugin: rooms and threads."""
 from __future__ import annotations
 
 from plugins.base import Plugin
@@ -139,13 +139,13 @@ class SocialPlugin(Plugin):
             session._social_scroll_up = 0  # type: ignore[attr-defined]
             return True
         if key == "ENTER":
-            # Enter = enter the room's chat (B8). The pane already
-            # live-previews; this is the full Telegram-style surface.
+            # Same two-pane Threads surface; compose-focus on the
+            # highlighted room. ESC returns to browsing rooms.
             conv = await self._social_target_conv(session, rooms, sel)
             if conv is None:
                 await self.bbs.send(session, "\r\n(no room selected)\r\n")
                 return True
-            await self._social_chat(session, conv)
+            await self._social_thread(session, conv)
             return True
         if key == "N":
             await self._social_new_thread(session)
@@ -167,6 +167,28 @@ class SocialPlugin(Plugin):
             return await self.bbs.conversations.get_conversation(room.id)
         except Exception:
             return None
+
+    async def _select_thread_room(self, session, conv: dict) -> None:
+        """Keep the sidebar highlight on the thread we are composing in."""
+        from plugins.social.social import social_rooms
+
+        rooms = await social_rooms(
+            self.bbs.conversations, getattr(session, "user", None))
+        cid = conv.get("id")
+        kind = conv.get("kind")
+        if not kind and cid:
+            try:
+                full = await self.bbs.conversations.get_conversation(cid)
+                kind = (full or {}).get("kind")
+            except Exception:
+                kind = None
+        for i, r in enumerate(rooms):
+            if r.kind == "dms" and kind == "dm":
+                session._pim_selected = i  # type: ignore[attr-defined]
+                return
+            if r.id == cid:
+                session._pim_selected = i  # type: ignore[attr-defined]
+                return
 
     async def _social_new_thread(self, session):
         """Compose mode: prompt for a title (capped), then create+select.
@@ -207,21 +229,32 @@ class SocialPlugin(Plugin):
             await self.bbs.send(session, f"Thread '{title}' created.\r\n")
             return
 
-    async def _social_chat(self, session, conv: dict) -> None:
-        """Telegram-style chat (B8): bubble history + one-line prompt.
+    def _social_tab_bar(self, session) -> str:
+        """Same home tab row mainmenu paints above the Social pane."""
+        mm = self.bbs.get_plugin("mainmenu") if self.bbs is not None else None
+        if mm is None:
+            return " " * 79
+        from plugins.mainmenu.tabs import load_tabs, visible_tabs
+
+        user = getattr(session, "user", None)
+        tabs = visible_tabs(load_tabs(self.bbs), user)
+        return mm._render_tabs(session, tabs, "social")[:79].ljust(79)
+
+    async def _social_thread(self, session, conv: dict) -> None:
+        """Compose-focus on the highlighted thread. Same two-pane chrome.
 
         The prompt never wraps or grows. Empty Enter, Ctrl-Enter (LF), or
         typing past the wrap column opens the overlay notepad; they type
         through the transition. Leaving the notepad with a draft (and Enter
         on a one-line draft) always opens Post / Editor / Discard. ESC on
-        the picker keeps the draft on the prompt; ESC on the prompt leaves
-        chat. UP/DOWN scroll history (tail-anchored). Idle polls once a
-        second so mail that arrived since last leave shows as *NEW*.
+        the picker keeps the draft on the prompt; ESC on the prompt returns
+        to browsing rooms. UP/DOWN scroll history (tail-anchored). Idle
+        polls once a second so mail that arrived since last leave shows
+        as *NEW*.
         """
         import time
 
-        from plugins.social.bubbles import render_bubbles
-        from plugins.social.social import new_badge_from_id
+        from plugins.social.social import THREAD_HINT, new_badge_from_id, render_social
         from shared.textwrap import wrap as _tw_wrap
 
         cid = conv["id"]
@@ -229,8 +262,6 @@ class SocialPlugin(Plugin):
         h = int(getattr(session, "terminal_height", 24) or 24)
         w = 79
         inner = w - 2  # '> ' prefix; wrap column for the one-line prompt
-        is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
-        pal = palette_for(session)
 
         def phys_rows(d: str) -> int:
             n = 0
@@ -292,6 +323,7 @@ class SocialPlugin(Plugin):
                 await self.bbs.conversations.mark_read(uname, cid)
             except Exception:
                 pass
+            await self._select_thread_room(session, conv)
             scroll_back = 0
             draft = ""
             rows = input_rows(draft)
@@ -340,24 +372,6 @@ class SocialPlugin(Plugin):
                 last_fp = fp
 
                 if dirty:
-                    budget = max(4, h - 2 - len(rows))
-                    groups: list[list[str]] = []
-                    used = 0
-                    window = msgs[max(0, len(msgs) - scroll_back - budget):
-                                  len(msgs) - scroll_back] or msgs[:1]
-                    for m in reversed(window):
-                        grows = render_bubbles(
-                            [m], w, username=uname,
-                            new_from_id=new_from, plain=is_plain,
-                            palette=None if is_plain else pal)
-                        if used + len(grows) > budget:
-                            break
-                        groups.append(grows)
-                        used += len(grows)
-                    vis_rows: list[str] = []
-                    for grows in reversed(groups):
-                        vis_rows.extend(grows)
-
                     new_count = (
                         sum(
                             1 for m in msgs
@@ -366,27 +380,32 @@ class SocialPlugin(Plugin):
                         )
                         if new_from else 0
                     )
-                    title = str(conv.get("title", cid))
-                    head = (
-                        f" {title} - {len(msgs)} msgs - "
-                        "Enter post · empty Enter editor · ESC back "
-                    )
                     status_parts = []
                     if scroll_back:
-                        status_parts.append(f"history: {scroll_back} newer hidden - DOWN/PgDn")
+                        status_parts.append(
+                            f"history: {scroll_back} newer hidden - DOWN/PgDn")
                     if new_count:
                         status_parts.append(f"{new_count} NEW")
-                    status = ("  ".join(status_parts)) if (scroll_back or new_count) else ""
-
-                    lines = [head[:w].ljust(w)]
-                    lines.extend(vis_rows[:budget])
-                    while len(lines) < 1 + budget:
-                        lines.append(" " * w)
-                    lines.append(status[:w].ljust(w))
-                    lines.extend(rows)
+                    status = "  ".join(status_parts)
+                    session._pim_active_tab = "social"  # type: ignore[attr-defined]
+                    await self._select_thread_room(session, conv)
+                    pane = await render_social(
+                        self.bbs.conversations, session,
+                        compact=False,
+                        new_from_id=new_from,
+                        scroll_up=scroll_back,
+                        hint=THREAD_HINT,
+                        status=status,
+                    )
+                    tab = self._social_tab_bar(session)
+                    frame = [tab] + pane.split("\r\n")
+                    while len(frame) < h - len(rows):
+                        frame.append(" " * w)
+                    frame = frame[: h - len(rows)]
+                    frame.extend(rows)
                     await self.bbs.send(
                         session,
-                        "\x1b[2J\x1b[H" + "\x1b[K\r\n".join(lines[:h]),
+                        "\x1b[2J\x1b[H" + "\x1b[K\r\n".join(frame[:h]),
                     )
 
                 if pending_offer:

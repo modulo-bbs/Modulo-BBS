@@ -87,7 +87,7 @@ def _run_chat(s, app, conv, keys):
 
     runner.read_key = fake_rk  # type: ignore[assignment]
     try:
-        asyncio.run(p._social_chat(s, conv))
+        asyncio.run(p._social_thread(s, conv))
     finally:
         runner.read_key = orig  # type: ignore[assignment]
 
@@ -116,7 +116,7 @@ def test_typing_at_prompt_posts_and_esc_exits(tmp_path):
 
         runner.read_key = fake_rk  # type: ignore[assignment]
         try:
-            await p._social_chat(s, {"id": "b1", "title": "General"})
+            await p._social_thread(s, {"id": "b1", "title": "General"})
         finally:
             runner.read_key = orig  # type: ignore[assignment]
 
@@ -157,7 +157,7 @@ def test_enter_at_end_always_tail_anchored(tmp_path):
 
         runner.read_key = fake_rk  # type: ignore[assignment]
         try:
-            await p._social_chat(s, {"id": "big", "title": "General"})
+            await p._social_thread(s, {"id": "big", "title": "General"})
         finally:
             runner.read_key = orig  # type: ignore[assignment]
 
@@ -184,7 +184,7 @@ def test_up_scrolls_history_down_returns(tmp_path):
 
         runner.read_key = fake_rk  # type: ignore[assignment]
         try:
-            await p._social_chat(s, {"id": "b1", "title": "General"})
+            await p._social_thread(s, {"id": "b1", "title": "General"})
         finally:
             runner.read_key = orig  # type: ignore[assignment]
         text = bytes(s.writer.buf).decode("cp437", errors="replace")
@@ -210,7 +210,7 @@ def test_echo_suppressed_during_chat_restored_after(tmp_path):
 
         runner.read_key = fake_rk  # type: ignore[assignment]
         try:
-            await p._social_chat(s, {"id": "b1", "title": "General"})
+            await p._social_thread(s, {"id": "b1", "title": "General"})
         finally:
             runner.read_key = orig  # type: ignore[assignment]
         assert not getattr(s, "suppress_echo", False)
@@ -230,6 +230,20 @@ def test_entry_crlf_lf_does_not_open_editor(tmp_path):
     assert "[2 lines]" not in _plain(s)
     msgs = asyncio.run(app.conversations.list_messages("b1"))
     assert len(msgs) == 1
+
+
+def test_thread_focus_keeps_sidebar(tmp_path):
+    """ENTER a room stays on the two-pane Threads surface."""
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    _run_chat(s, app, {"id": "b1", "title": "General"}, iter(["ESC"]))
+    text = _plain(s)
+    assert "DMs" in text
+    assert "General" in text
+    assert "Enter post" in text
+    assert "hello room" in text
 
 
 def test_empty_enter_opens_editor(tmp_path):
@@ -393,7 +407,7 @@ def test_crlf_trailing_lf_does_not_leak_into_next_draft(tmp_path):
 
         runner.read_key = fake_rk  # type: ignore[assignment]
         try:
-            await app.get_plugin("social")._social_chat(
+            await app.get_plugin("social")._social_thread(
                 s, {"id": "b1", "title": "General"})
         finally:
             runner.read_key = orig  # type: ignore[assignment]

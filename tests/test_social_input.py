@@ -253,8 +253,9 @@ def test_enter_opens_chat_and_esc_returns(tmp_path):
         finally:
             runner.read_key = orig  # type: ignore[assignment]
         text = bytes(s.writer.buf).decode("cp437", errors="replace")
-        # chat surface rendered the room with bubbles + input prompt
+        # two-pane thread: sidebar + bubbles + compose prompt
         assert "First Board" in text and ">" in text
+        assert "DMs" in text
         # entering cleared unread
         assert await app.conversations.unread_count("dave", "b1") == 0
 

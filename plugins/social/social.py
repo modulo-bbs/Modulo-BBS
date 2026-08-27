@@ -29,7 +29,8 @@ PANE_CELL = 54
 SID_INNER = SID_CELL - 2   # text width after the padding spaces
 PANE_INNER = PANE_CELL - 2
 
-SOCIAL_HINT = "  Enter chat · Up/Dn rooms · N new thread · Space/PgUp/PgDn peek · ESC back"[:79]
+SOCIAL_HINT = "  Enter thread · Up/Dn rooms · N new thread · Space/PgUp/PgDn peek · ESC back"[:79]
+THREAD_HINT = "  Enter post · empty Enter editor · ESC back"[:79]
 
 
 def new_badge_from_id(last_read: int) -> int:
@@ -126,13 +127,27 @@ def _activity_key_conv(conv: dict) -> str:
     return _activity_key(conv)
 
 
-async def render_social(conversations, session) -> str:
+async def render_social(
+    conversations,
+    session,
+    *,
+    compact: bool = True,
+    new_from_id: int | None = None,
+    scroll_up: int | None = None,
+    hint: str | None = None,
+    status: str = "",
+) -> str:
     """The Social tab's pane band: room sidebar | live thread pane.
 
     Selection is ``session._pim_selected`` (index into ``social_rooms()``);
     changing rooms re-renders immediately and re-anchors the message
     scroll to the newest activity. Scroll position is stored as lines
     scrolled *up from the bottom* (0 = tail) in ``session._social_scroll_up``.
+
+    *compact* is the browse preview (author-only bubbles). Thread focus
+    passes ``compact=False`` so the same two-pane chrome shows full
+    bubbles; *hint* / *status* / *new_from_id* / *scroll_up* override the
+    browse defaults without a second surface.
     """
     from core.theme import palette_for
 
@@ -191,17 +206,20 @@ async def render_social(conversations, session) -> str:
     # -- scroll state (lines up from the bottom; reset on room change) -------
     cur_id = room.id if room else ""
     prev_id = getattr(session, "_social_room_id", None)
-    up = int(getattr(session, "_social_scroll_up", 0) or 0)
-    if prev_id != cur_id:
-        up = 0
+    if scroll_up is None:
+        up = int(getattr(session, "_social_scroll_up", 0) or 0)
+        if prev_id != cur_id:
+            up = 0
+            try:
+                session._social_scroll_up = 0
+            except Exception:
+                pass
         try:
-            session._social_scroll_up = 0
+            session._social_room_id = cur_id
         except Exception:
             pass
-    try:
-        session._social_room_id = cur_id
-    except Exception:
-        pass
+    else:
+        up = max(0, int(scroll_up))
 
     # -- build message lines for the pane ------------------------------------
     # B8: compact bubbles (summarized) instead of the old #id [author] list.
@@ -214,7 +232,10 @@ async def render_social(conversations, session) -> str:
                 username, thread_conv["id"])
         except Exception:
             last_read = 0
-    new_from = new_badge_from_id(last_read)
+    new_from = (
+        int(new_from_id) if new_from_id is not None
+        else new_badge_from_id(last_read)
+    )
 
     from plugins.social.bubbles import render_bubbles as _render_bubbles
 
@@ -228,7 +249,7 @@ async def render_social(conversations, session) -> str:
         for m in reversed(window):
             grows = _render_bubbles(
                 [m], PANE_INNER, username=username,
-                new_from_id=new_from, plain=is_plain, compact=True,
+                new_from_id=new_from, plain=is_plain, compact=compact,
                 palette=None if is_plain else palette_for(session))
             if used + len(grows) > pane_rows_n:
                 break
@@ -331,6 +352,9 @@ async def render_social(conversations, session) -> str:
         hint_txt = "up/dn select"
     top = _build_top(labels, active_idx, hint_txt, is_plain, screen_width=79, session=session)
     bot = "+" + "-" * 77 + "+" if is_plain else f"{pal.muted}└{'─' * 77}┘{pal.reset}"
-    hint = SOCIAL_HINT if is_plain else f"{pal.success}{SOCIAL_HINT}{pal.reset}"
+    hint_txt = SOCIAL_HINT if hint is None else hint
+    if status:
+        hint_txt = f" {status}  {hint_txt.strip()}"[:79]
+    hint = hint_txt if is_plain else f"{pal.success}{hint_txt}{pal.reset}"
     lines = [top] + rows + [bot, hint]
     return "\r\n".join(lines)
