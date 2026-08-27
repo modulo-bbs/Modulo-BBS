@@ -4,7 +4,9 @@ Boards and DMs as a two-pane Social surface. Listed in
 `plugins/mainmenu/data/home` as `social`. Delete that line to drop the tab.
 
 ENTER on a room focuses that thread — same two-pane screen, left column
-stays. Bubbles are **me vs everyone else**:
+stays. The middle divider points at the column that currently has the
+keys (`<` rooms / `>` thread; UTF-8 `←` `→`) with ESC stacked in the
+gutter. Bubbles are **me vs everyone else**:
 your messages sit **right / accent**, everyone else **left / success**.
 Sidebar `*` is unread until you open the thread. `*NEW*` is other people's
 mail that arrived since you last left — never on history you already opened,

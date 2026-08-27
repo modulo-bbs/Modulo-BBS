@@ -10,7 +10,7 @@ import re
 from types import SimpleNamespace
 
 from core.user import User
-from plugins.social.social import render_social
+from plugins.social.social import focus_arrows, gutter_stack, render_social
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
@@ -174,6 +174,65 @@ def test_selection_follows_room_when_activity_reorders():
         assert "hello from General" not in again
         assert s._pim_selected == 2
         assert s._social_selected_id == "newtest-1"
+
+    asyncio.run(_a())
+
+
+def _mid_gutter(out: str) -> str:
+    """Visible chars of the 1-col divider between sidebar and pane."""
+    chars = []
+    for ln in out.split("\r\n"):
+        v = vis(ln)
+        if v.startswith("│") and len(v) == 79:
+            chars.append(v[23])
+    return "".join(chars)
+
+
+def test_gutter_stack_centers_esc_and_arrows():
+    left = gutter_stack(9, True, "<", ">", "|")
+    assert "".join(left) == "||<ESC<||"
+    right = gutter_stack(9, False, "<", ">", "|")
+    assert "".join(right) == "||>ESC>||"
+    assert gutter_stack(3, True, "<", ">", "|") == ["<", "E", "S"]
+
+
+def test_focus_arrows_follow_codec():
+    s = _session(User(username="dave"))
+    assert focus_arrows(s, True) == ("<", ">")
+    s.codec = "utf-8"
+    assert focus_arrows(s, False) == ("←", "→")
+    s.codec = "cp437"
+    assert focus_arrows(s, False) == ("<", ">")
+
+
+def test_utf8_gutter_uses_unicode_arrows():
+    async def _a():
+        s = _session(User(username="dave"), plain=False, sel=0)
+        s.codec = "utf-8"
+        mid = _mid_gutter(await render_social(StubConvs(), s))
+        assert "←ESC←" in mid
+
+    asyncio.run(_a())
+
+
+def test_browse_gutter_points_left_with_esc():
+    async def _a():
+        s = _session(User(username="dave"), sel=0)
+        mid = _mid_gutter(await render_social(StubConvs(), s))
+        assert "<ESC<" in mid
+        assert ">" not in mid
+
+    asyncio.run(_a())
+
+
+def test_thread_gutter_points_right_with_esc():
+    async def _a():
+        s = _session(User(username="dave"), sel=0)
+        mid = _mid_gutter(
+            await render_social(StubConvs(), s, compact=False)
+        )
+        assert ">ESC>" in mid
+        assert "<" not in mid
 
     asyncio.run(_a())
 

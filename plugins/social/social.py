@@ -33,6 +33,41 @@ SOCIAL_HINT = "  Enter thread · Up/Dn rooms · N new thread · Space/PgUp/PgDn 
 THREAD_HINT = "  Enter post · empty Enter editor · ESC back"[:79]
 
 
+def focus_arrows(session, is_plain: bool) -> tuple[str, str]:
+    """Left/right pointer for the Social divider, per session codec.
+
+    ASCII and CP437 use ``<`` / ``>`` (IBM C0 arrows are 0x1A/0x1B and
+    collide with ESC when mixed with colour). UTF-8 gets ``←`` / ``→``.
+    """
+    if is_plain:
+        return "<", ">"
+    codec = getattr(session, "codec", None) or "cp437"
+    if codec == "utf-8":
+        return "←", "→"
+    return "<", ">"
+
+
+def gutter_stack(
+    n_rows: int, focus_left: bool, left: str, right: str, bar: str,
+) -> list[str]:
+    """One glyph per content row for the middle divider.
+
+    Arrows point at the column that currently has keys; ESC is stacked
+    between them so the back key sits on the seam.
+    """
+    arrow = left if focus_left else right
+    block = [arrow, "E", "S", "C", arrow]
+    glyphs = [bar] * max(0, n_rows)
+    if n_rows <= 0:
+        return glyphs
+    if n_rows < len(block):
+        block = block[:n_rows]
+    start = (n_rows - len(block)) // 2
+    for i, ch in enumerate(block):
+        glyphs[start + i] = ch
+    return glyphs
+
+
 def new_badge_from_id(last_read: int) -> int:
     """First message id that earns *NEW*. 0 = never visited (star only)."""
     last = int(last_read or 0)
@@ -347,8 +382,8 @@ async def render_social(
         return f"{pal.text}{padded}{pal.reset}"
 
     def side_selected(row_idx: int) -> bool:
-        """Sidebar row highlight mirrors the room selection."""
-        if not rooms:
+        """Sidebar row highlight only while the left column has the keys."""
+        if not compact or not rooms:
             return False
         if row_idx == 0:
             return sel == 0
@@ -357,14 +392,22 @@ async def render_social(
 
     bar = "" if is_plain else pal.muted
     rst = "" if is_plain else pal.reset
+    left_a, right_a = focus_arrows(session, is_plain)
+    stack = gutter_stack(content_rows, compact, left_a, right_a, "│")
+    focus = "" if is_plain else pal.accent
     rows: list[str] = []
     for i in range(content_rows):
         ltxt = side[i] if i < len(side) else ""
         rtxt = pane[i] if i < len(pane) else ""
+        gch = stack[i]
+        if gch == "│":
+            gutter = f"{bar}{gch}{rst}"
+        else:
+            gutter = f"{focus}{gch}{rst}"
         rows.append(
             f"{bar}│{rst}"
             + cell(ltxt, SID_INNER, side_selected(i))
-            + f"{bar}│{rst}"
+            + gutter
             + cell(rtxt, PANE_INNER, False)
             + f"{bar}│{rst}"
         )
