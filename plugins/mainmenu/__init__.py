@@ -127,17 +127,24 @@ def _strip_ansi(s: str) -> str:
 
 
 def _hint_for_session(session) -> str:
-    """Hint text: arrows+WASD on ANSI/CP437, WASD only on plain/UTF-8."""
+    """Hint under the active tab: arrows+WASD when the codec can show them."""
     is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
-    codec = getattr(session, "codec", "cp437")
-    # CP437 arrows are 0x18-0x1B; when encoded as cp437 they become single-byte glyphs.
-    # Use Unicode arrows that map to those bytes via cp437 codec; fallback to WASD.
-    if not is_plain and codec == "cp437":
-        # 4 arrows (CP437 0x18-0x1B) + '/' + WASD = 9, plus ' select ' → 17
-        # Use raw control bytes that encode as 0x18-0x1B on cp437 wire and show as arrows in SyncTERM
-        return " \x18\x19\x1B\x1A/WASD select "
-    else:
+    if is_plain:
         return " WASD select "
+    codec = getattr(session, "codec", None) or "cp437"
+    if codec == "utf-8":
+        return " ↑↓←→/WASD select "
+    if codec == "ascii":
+        return " WASD select "
+    # CP437 arrows 0x18-0x1B; shown as glyphs in SyncTERM ANSI-BBS mode.
+    return " \x18\x19\x1B\x1A/WASD select "
+
+
+def _chrome_chars(is_plain: bool) -> tuple[str, str, str]:
+    """Vertical, rule, and funnel-close glyphs for the tab/funnel rows."""
+    if is_plain:
+        return "|", "-", "\\"
+    return "│", "─", "┐"
 
 
 def _flow_cells(labels, hint, active_idx):
@@ -157,14 +164,21 @@ def _flow_cells(labels, hint, active_idx):
 
 
 def _build_top(labels, active_idx, hint, is_plain, screen_width=79, session=None):
-    """Funnel/head row: rule whose '|' sits directly below the active tab's
-    opening '|' and whose backslash closes the stop after the hint —
+    """Funnel/head row: rule whose opening bar sits under the active tab's
+    opening bar and whose close sits under the tab's closing bar —
     everything below belongs to this heading. Slides with the active tab.
     """
     _w, x, slot = _flow_cells(labels, hint, active_idx)
-    fill = "-" if is_plain else "─"
-    head = "| " + hint.center(slot) + " " + chr(92)
-    left = fill * x
+    pipe, fill, close = _chrome_chars(is_plain)
+    head = pipe + " " + hint.center(slot) + " " + close
+    if x <= 0:
+        left = ""
+    elif is_plain:
+        left = fill * x
+    else:
+        # Stack with the pane's left │; a run of ─ here looked like a stray
+        # stub on UTF-8 (tab |, funnel ─, pane │).
+        left = pipe + fill * (x - 1)
     right = fill * max(0, screen_width - x - len(head))
     row = (left + head + right)[:screen_width].ljust(screen_width, fill)
     if is_plain:
@@ -385,6 +399,7 @@ class MainmenuPlugin(Plugin):
         active_idx = max(0, next((i for i, x in enumerate(tabs) if x["id"] == active_id), 0))
         hint = _hint_for_session(session)
         widths, _x, _s = _flow_cells(labels, hint, active_idx)
+        pipe, _fill, _close = _chrome_chars(is_plain)
         parts = []
         for i, tb in enumerate(tabs):
             lab = tb["label"]
@@ -395,7 +410,7 @@ class MainmenuPlugin(Plugin):
                 parts.append(f"{p.tab_fg}{p.tab_bg}{cell}{p.reset}")
             else:
                 parts.append(f"{p.muted}{cell}{p.reset}")
-        row = "".join(f"| {c} | " for c in parts)
+        row = "".join(f"{pipe} {c} {pipe} " for c in parts)
         vis = 5 * len(parts) + sum(widths)
         return row + " " * max(0, 79 - vis)
 
