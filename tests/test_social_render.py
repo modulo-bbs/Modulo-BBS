@@ -188,12 +188,12 @@ def _mid_gutter(out: str) -> str:
     return "".join(chars)
 
 
-def test_gutter_stack_centers_esc_and_arrows():
-    left = gutter_stack(9, True, "<", ">", "|")
-    assert "".join(left) == "||<ESC<||"
-    right = gutter_stack(9, False, "<", ">", "|")
-    assert "".join(right) == "||>ESC>||"
-    assert gutter_stack(3, True, "<", ">", "|") == ["<", "E", "S"]
+def test_gutter_stack_points_at_the_column_you_can_enter():
+    rooms = gutter_stack(9, True, "<", ">", "|")
+    assert "".join(rooms) == "|>ENTER>|"
+    thread = gutter_stack(9, False, "<", ">", "|")
+    assert "".join(thread) == "||<ESC<||"
+    assert gutter_stack(3, True, "<", ">", "|") == [">", "E", "N"]
 
 
 def test_focus_arrows_follow_codec():
@@ -210,29 +210,29 @@ def test_utf8_gutter_uses_unicode_arrows():
         s = _session(User(username="dave"), plain=False, sel=0)
         s.codec = "utf-8"
         mid = _mid_gutter(await render_social(StubConvs(), s))
-        assert "←ESC←" in mid
+        assert "→ENTER→" in mid
 
     asyncio.run(_a())
 
 
-def test_browse_gutter_points_left_with_esc():
+def test_browse_gutter_points_right_with_enter():
     async def _a():
         s = _session(User(username="dave"), sel=0)
         mid = _mid_gutter(await render_social(StubConvs(), s))
-        assert "<ESC<" in mid
-        assert ">" not in mid
+        assert ">ENTER>" in mid
+        assert "<" not in mid
 
     asyncio.run(_a())
 
 
-def test_thread_gutter_points_right_with_esc():
+def test_thread_gutter_points_left_with_esc():
     async def _a():
         s = _session(User(username="dave"), sel=0)
         mid = _mid_gutter(
             await render_social(StubConvs(), s, compact=False)
         )
-        assert ">ESC>" in mid
-        assert "<" not in mid
+        assert "<ESC<" in mid
+        assert ">" not in mid
 
     asyncio.run(_a())
 

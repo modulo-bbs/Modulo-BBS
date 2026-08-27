@@ -52,11 +52,15 @@ def gutter_stack(
 ) -> list[str]:
     """One glyph per content row for the middle divider.
 
-    Arrows point at the column that currently has keys; ESC is stacked
-    between them so the back key sits on the seam.
+    Arrows point at the column you can move *into*, with the key that
+    takes you there stacked between them: ENTER from rooms, ESC from
+    the thread.
     """
-    arrow = left if focus_left else right
-    block = [arrow, "E", "S", "C", arrow]
+    if focus_left:
+        arrow, word = right, "ENTER"
+    else:
+        arrow, word = left, "ESC"
+    block = [arrow, *word, arrow]
     glyphs = [bar] * max(0, n_rows)
     if n_rows <= 0:
         return glyphs
