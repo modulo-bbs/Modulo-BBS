@@ -31,13 +31,21 @@ from core.theme import palette_for
 
 
 def _collapse_overlay_spacing(text: str) -> str:
-    """Save-time: drop blank (and whitespace-only) lines so double-spacing
-    and above become single-spaced. Stops tall empty bubbles from the
-    overlay editor without touching intra-line spaces."""
-    lines = []
+    """Save-time: collapse runs of blank lines to a single blank line.
+
+    Double-spacing and above become one empty line between paragraphs.
+    Leading/trailing blanks are dropped. Intra-line spaces are untouched.
+    """
+    lines: list[str] = []
+    pending_blank = False
     for ln in (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         if ln.strip() == "":
+            if lines:
+                pending_blank = True
             continue
+        if pending_blank:
+            lines.append("")
+            pending_blank = False
         lines.append(ln)
     return "\n".join(lines)
 

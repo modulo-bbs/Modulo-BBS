@@ -15,12 +15,10 @@ import pytest
 from core import runner
 from core.app import BBSApp
 from core.user import User
-from plugins.mainmenu import (
-    MainmenuPlugin,
-    _collapse_overlay_spacing,
-)
+from plugins.mainmenu import MainmenuPlugin
 from plugins.modal import ModalPlugin
 from plugins.modal.overlay import compact_overlay_geom, paint_overlay
+from plugins.social import _collapse_overlay_spacing
 from server.session import Session
 
 
@@ -466,10 +464,12 @@ def test_collapsed_preview_after_editor(tmp_path):
 
 
 def test_notepad_save_collapses_blank_lines_to_single_spacing():
-    assert _collapse_overlay_spacing("up\n\n\n\ndown") == "up\ndown"
-    assert _collapse_overlay_spacing("up\n   \n\ndown") == "up\ndown"
+    assert _collapse_overlay_spacing("up\n\n\n\ndown") == "up\n\ndown"
+    assert _collapse_overlay_spacing("up\n   \n\ndown") == "up\n\ndown"
+    assert _collapse_overlay_spacing("up\n\ndown") == "up\n\ndown"
     assert _collapse_overlay_spacing("keep\nthis") == "keep\nthis"
     assert _collapse_overlay_spacing("  indented") == "  indented"
+    assert _collapse_overlay_spacing("\n\nup\n\n") == "up"
 
 
 def test_post_collapses_tomfoolery_blank_lines(tmp_path):
@@ -483,7 +483,7 @@ def test_post_collapses_tomfoolery_blank_lines(tmp_path):
     )
     _run_chat(s, app, {"id": "b1", "title": "General"}, iter(keys))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
-    assert msgs[-1]["body"] == "up\ndown"
+    assert msgs[-1]["body"] == "up\n\ndown"
 
 
 def test_editor_esc_keeps_text_does_not_post(tmp_path):
