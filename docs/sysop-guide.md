@@ -210,8 +210,9 @@ plugins/
 Social rooms are `kind=board` conversations. Sysops manage messages through the
 One-API ops (`conversations.*`, with `boards.*` shims) — see `docs/one-api.md`;
 in-app, Social rooms are the Telegram-style chat (see
-`plugins/mainmenu/docs/README.md` for the key map: one-line prompt, Enter
-opens Post / Editor / Discard, empty Enter or wrap opens the notepad, ESC back).
+`plugins/social/docs/README.md` for the key map: one-line prompt, Enter
+opens Post / Editor / Discard, empty Enter or wrap opens the notepad,
+leaving the notepad with a draft reopens the modal).
 
 ## Monitoring
 

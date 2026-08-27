@@ -202,11 +202,11 @@ class SocialPlugin(Plugin):
 
         The prompt never wraps or grows. Empty Enter, Ctrl-Enter (LF), or
         typing past the wrap column opens the overlay notepad; they type
-        through the transition. Enter with text always opens Post / Editor
-        / Discard (Post is the default). ESC is universal back: editor and
-        picker return to the prompt with the draft kept; ESC on the prompt
-        leaves chat. UP/DOWN scroll history (tail-anchored). Idle polls
-        once a second so other nodes appear as *NEW* bubbles.
+        through the transition. Leaving the notepad with a draft (and Enter
+        on a one-line draft) always opens Post / Editor / Discard. ESC on
+        the picker keeps the draft on the prompt; ESC on the prompt leaves
+        chat. UP/DOWN scroll history (tail-anchored). Idle polls once a
+        second so other nodes appear as *NEW* bubbles.
         """
         import time
 
@@ -277,8 +277,41 @@ class SocialPlugin(Plugin):
             draft = ""
             rows = input_rows(draft)
             last_fp = None
+            pending_offer = False
             last_key_at = time.monotonic()
             await self.bbs.send(session, "\x1b[2J\x1b[H")
+
+            async def after_editor_or_picker(new_draft: str) -> None:
+                nonlocal draft, rows, last_fp, baseline, scroll_back, msgs
+                draft = new_draft
+                rows = input_rows(draft)
+                last_fp = None
+                try:
+                    fresh = await self.bbs.conversations.list_messages(cid)
+                except Exception:
+                    fresh = msgs
+                msgs = fresh
+                baseline = max(
+                    (int(m.get("id", 0)) for m in fresh), default=baseline)
+
+            async def offer_draft() -> None:
+                """Post / Editor / Discard. After the notepad, paint first."""
+                nonlocal draft, scroll_back, last_fp, pending_offer
+                if not draft.strip():
+                    return
+                choice = await self._compose_picker(session)
+                if choice == "post":
+                    await commit(draft)
+                    scroll_back = 0
+                    await after_editor_or_picker("")
+                elif choice == "editor":
+                    await after_editor_or_picker(await open_editor(draft))
+                    if draft.strip():
+                        pending_offer = True
+                elif choice == "discard":
+                    await after_editor_or_picker("")
+                else:
+                    last_fp = None
 
             while getattr(session, "is_active", True):
                 try:
@@ -332,6 +365,11 @@ class SocialPlugin(Plugin):
                         "\x1b[2J\x1b[H" + "\x1b[K\r\n".join(lines[:h]),
                     )
 
+                if pending_offer:
+                    pending_offer = False
+                    await offer_draft()
+                    continue
+
                 key = await runner.read_key(
                     self.bbs, session,
                     timeout=1.0, preserve_case=True, idle_on_timeout=False,
@@ -347,39 +385,18 @@ class SocialPlugin(Plugin):
                     await self.bbs.send(
                         session, f"\x1b[{start};1H\x1b[J" + "\r\n".join(rows))
 
-                async def after_editor_or_picker(new_draft: str) -> None:
-                    nonlocal draft, rows, last_fp, baseline, scroll_back, msgs
-                    draft = new_draft
-                    rows = input_rows(draft)
-                    last_fp = None
-                    try:
-                        fresh = await self.bbs.conversations.list_messages(cid)
-                    except Exception:
-                        fresh = msgs
-                    msgs = fresh
-                    baseline = max(
-                        (int(m.get("id", 0)) for m in fresh), default=baseline)
-
                 if key == "ESC":
                     break
                 if key == "ENTER":
                     swallow_crlf()
                     if not draft.strip():
                         await after_editor_or_picker(await open_editor(draft))
+                        pending_offer = bool(draft.strip())
                     else:
-                        choice = await self._compose_picker(session)
-                        if choice == "post":
-                            await commit(draft)
-                            scroll_back = 0
-                            await after_editor_or_picker("")
-                        elif choice == "editor":
-                            await after_editor_or_picker(await open_editor(draft))
-                        elif choice == "discard":
-                            await after_editor_or_picker("")
-                        else:
-                            last_fp = None
+                        await offer_draft()
                 elif key == "LF":
                     await after_editor_or_picker(await open_editor(draft + "\n"))
+                    pending_offer = bool(draft.strip())
                 elif key == "BACKSPACE":
                     if draft:
                         draft = draft[:-1]
@@ -402,6 +419,7 @@ class SocialPlugin(Plugin):
                     if would_overflow(draft, extra):
                         await after_editor_or_picker(
                             await open_editor(draft + extra))
+                        pending_offer = bool(draft.strip())
                     else:
                         draft += extra
                         rows = input_rows(draft)

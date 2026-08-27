@@ -1,8 +1,9 @@
 """B8 — Social chat: one-line prompt, Enter/ESC compose, overlay notepad.
 
 Enter with text opens Post / Editor / Discard (Post default). Empty Enter,
-wrap, or LF opens the notepad; ESC keeps the draft. Posting always goes
-through the picker. Ctrl-S / Ctrl-E do not send.
+wrap, or LF opens the notepad; leaving it with a draft reopens the picker.
+ESC on the picker keeps the draft. Posting always goes through the picker.
+Ctrl-S / Ctrl-E do not send.
 """
 from __future__ import annotations
 
@@ -238,7 +239,7 @@ def test_empty_enter_opens_editor(tmp_path):
     dave = User(username="dave", groups=[])
     s = _session(dave)
     _run_chat(s, app, {"id": "b1", "title": "General"},
-              iter(["ENTER"] + list("hi") + ["ESC", "ESC"]))
+              iter(["ENTER"] + list("hi") + ["ESC", "ESC", "ESC"]))
     text = _plain(s)
     assert "+----" in text or "\u250c" in bytes(s.writer.buf)
     assert "ESC back" in text
@@ -264,7 +265,7 @@ def test_picker_down_opens_editor(tmp_path):
     s = _session(dave)
     _run_chat(s, app, {"id": "b1", "title": "General"},
               iter(list("hi") + ["ENTER", "DOWN", "ENTER"] + list("xy")
-                   + ["ESC", "ENTER", "ENTER", "ESC"]))
+                   + ["ESC", "ENTER", "ESC"]))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
     assert msgs[-1]["body"] == "hixy"
 
@@ -320,7 +321,7 @@ def test_lf_opens_editor_with_newline(tmp_path):
     dave = User(username="dave", groups=[])
     s = _session(dave)
     _run_chat(s, app, {"id": "b1", "title": "General"},
-              iter(["h", "i", "LF", "y", "o", "ESC", "ESC"]))
+              iter(["h", "i", "LF", "y", "o", "ESC", "ESC", "ESC"]))
     text = _plain(s)
     assert "[2 lines]" in text
     msgs = asyncio.run(app.conversations.list_messages("b1"))
@@ -332,7 +333,7 @@ def test_wrap_opens_editor_with_wrapping_char(tmp_path):
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    keys = ["x"] * 78 + ["ESC", "ESC"]
+    keys = ["x"] * 78 + ["ESC", "ESC", "ESC"]
     _run_chat(s, app, {"id": "b1", "title": "General"}, iter(keys))
     text = _plain(s)
     assert "[2 lines]" in text
@@ -346,7 +347,7 @@ def test_wrap_then_post_keeps_full_line(tmp_path):
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    keys = ["x"] * 78 + ["ESC", "ENTER", "ENTER", "ESC"]
+    keys = ["x"] * 78 + ["ESC", "ENTER", "ESC"]
     _run_chat(s, app, {"id": "b1", "title": "General"}, iter(keys))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
     assert msgs[-1]["body"] == "x" * 78
@@ -358,7 +359,7 @@ def test_enter_posts_multiline_body_with_newlines_intact(tmp_path):
     dave = User(username="dave", groups=[])
     s = _session(dave)
     _run_chat(s, app, {"id": "b1", "title": "General"},
-              iter(["ENTER", "a", "ENTER", "b", "ESC", "ENTER", "ENTER", "ESC"]))
+              iter(["ENTER", "a", "ENTER", "b", "ESC", "ENTER", "ESC"]))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
     assert msgs[-1]["body"] == "a\nb"
     assert msgs[-1]["author"] == "dave"
@@ -409,10 +410,11 @@ def test_no_emitted_segment_exceeds_79_visible_columns(tmp_path):
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
+    s.terminal_type = "ANSI-BBS"
     body = ("OK, So here is another attempt at writing a long message "
             "first wraparound will be tested, and you see what happened.")
     _run_chat(s, app, {"id": "b1", "title": "General"},
-              iter(list(body) + ["ESC", "ESC"]))
+              iter(list(body) + ["ESC", "ESC", "ESC"]))
 
     import re as _re
 
@@ -456,7 +458,7 @@ def test_collapsed_preview_after_editor(tmp_path):
         keys.extend(f"L{n:02d}")
         if n < 10:
             keys.append("ENTER")
-    keys.extend(["ESC", "ESC"])
+    keys.extend(["ESC", "ESC", "ESC"])
     _run_chat(s, app, {"id": "b1", "title": "General"}, iter(keys))
     text = _plain(s)
     assert "[10 lines]" in text
@@ -477,7 +479,7 @@ def test_post_collapses_tomfoolery_blank_lines(tmp_path):
     s = _session(dave)
     keys = (
         ["ENTER"] + list("up") + ["ENTER"] * 8 + list("down")
-        + ["ESC", "ENTER", "ENTER", "ESC"]
+        + ["ESC", "ENTER", "ESC"]
     )
     _run_chat(s, app, {"id": "b1", "title": "General"}, iter(keys))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
@@ -491,7 +493,8 @@ def test_editor_esc_keeps_text_does_not_post(tmp_path):
     s = _session(dave)
     before = asyncio.run(app.conversations.list_messages("b1"))
     _run_chat(s, app, {"id": "b1", "title": "General"},
-              iter(list("hi") + ["ENTER", "DOWN", "ENTER"] + list("xy") + ["ESC", "ESC"]))
+              iter(list("hi") + ["ENTER", "DOWN", "ENTER"] + list("xy")
+                   + ["ESC", "ESC", "ESC"]))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
     assert msgs == before
     assert "> [1 lines]" in _plain(s) or "> hixy" in _plain(s)
@@ -503,7 +506,7 @@ def test_ctrl_s_does_not_post(tmp_path):
     dave = User(username="dave", groups=[])
     s = _session(dave)
     _run_chat(s, app, {"id": "b1", "title": "General"},
-              iter(["ENTER"] + list("xy") + ["CTRL_S", "ESC", "ESC"]))
+              iter(["ENTER"] + list("xy") + ["CTRL_S", "ESC", "ESC", "ESC"]))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
     assert len(msgs) == 1
     assert "Ctrl-S save" not in _plain(s)
@@ -517,9 +520,25 @@ def test_editor_esc_then_post(tmp_path):
     s = _session(dave)
     _run_chat(s, app, {"id": "b1", "title": "General"},
               iter(list("hi") + ["ENTER", "DOWN", "ENTER"] + list("xy")
-                   + ["ESC", "ENTER", "ENTER", "ESC"]))
+                   + ["ESC", "ENTER", "ESC"]))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
     assert msgs[-1]["body"] == "hixy"
+
+
+def test_editor_esc_offers_picker_again(tmp_path):
+    """Leaving the notepad with a draft reopens Post / Editor / Discard."""
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    _run_chat(s, app, {"id": "b1", "title": "General"},
+              iter(list("hi") + ["ENTER", "DOWN", "ENTER", "ESC", "ESC", "ESC"]))
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert len(msgs) == 1
+    text = _plain(s)
+    assert "Post" in text
+    assert "Discard draft" in text
+    assert "> hi" in text
 
 
 def test_tall_draft_collapses_to_preview_then_posts(tmp_path):
@@ -527,7 +546,7 @@ def test_tall_draft_collapses_to_preview_then_posts(tmp_path):
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    keys = ["ENTER"] + ["a"] * 240 + ["ESC", "ENTER", "ENTER", "ESC"]
+    keys = ["ENTER"] + ["a"] * 240 + ["ESC", "ENTER", "ESC"]
     _run_chat(s, app, {"id": "b1", "title": "General"}, iter(keys))
     text = _plain(s)
     assert "[4 lines]" in text
@@ -540,7 +559,7 @@ def test_notepad_arrows_insert_midline(tmp_path):
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    keys = ["ENTER"] + list("ac") + ["LEFT", "b", "ESC", "ENTER", "ENTER", "ESC"]
+    keys = ["ENTER"] + list("ac") + ["LEFT", "b", "ESC", "ENTER", "ESC"]
     _run_chat(s, app, {"id": "b1", "title": "General"}, iter(keys))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
     assert msgs[-1]["body"] == "abc"
