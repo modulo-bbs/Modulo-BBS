@@ -82,7 +82,11 @@ top tabs (branches of one surface; see `plugins/mainmenu/tabs.py` +
 Boards→Social unification (2026-08-25) the default tab row is
 **Dashboard | Social | Files | Bulletins**: Social is a two-pane surface
 (room sidebar + live thread pane) that replaced the Boards tab and absorbed
-DMs as its pinned row; all reads/writes flow through `core/conversations.py`.
+DMs as its pinned row (`N` creates a thread; empty title aborts; there is
+no painted `+ new thread` row). Chat bubbles are me-vs-everyone-else
+(right/cyan vs left/green). All reads/writes flow through
+`core/conversations.py`. The Social pane leaves rows for the tab bar and
+the bottom `>` so 80×24 SyncTERM does not scroll the tabs off.
 File `pim.*` beats the generated chrome; `preferences.home_mode` toggles
 classic vs PIM.
 

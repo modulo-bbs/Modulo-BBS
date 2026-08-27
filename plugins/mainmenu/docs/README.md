@@ -52,13 +52,23 @@ Keys inside the PIM (numbers reserved for tabs — selection uses up/dn+Enter):
 - `UP`/`K` , `DOWN`/`J` → move highlight inside pane
 - `ENTER` → Social: enter the highlighted room's chat (B8); other tabs: open
   the full-screen reader
+- Social pane: `N` new thread (title ≤15; empty/whitespace silently aborts —
+  no conversation, no cancelled banner). There is no `+ new thread` sidebar
+  row; DMs is the pinned aggregate, then a separator, then rooms.
 - `/` → slash commands (`/screen`, `/help`) — same as classic
+
+The Social two-pane must leave a row for the tab bar and a row for the `>`
+prompt on 80×24; filling the screen used to scroll `Dashboard | Social | …`
+off the top of SyncTERM.
 
 ## Social chat (B8, Dave's Telegram-style surface)
 
-ENTER on a Social room opens a full-screen chat: bubble history (own messages
-right-aligned cyan, others green, `*NEW*` badge on arrivals since you entered),
-tail-anchored entry, 1s polling so other nodes appear live. Keys:
+ENTER on a Social room opens a full-screen chat. Bubbles are **me vs
+everyone else**, not per-person colors: your messages sit **right / cyan**,
+every other author sits **left / green** (tell people apart by the name in
+the title bar). `*NEW*` (yellow) marks other people's messages that arrived
+after you entered the room. Tail-anchored entry; 1s polling so other nodes
+appear live. Keys:
 
 | Key | Action |
 |---|---|
@@ -72,7 +82,7 @@ tail-anchored entry, 1s polling so other nodes appear live. Keys:
 
 SyncTERM key facts (hex-captured 2026-08-25): plain Enter sends CR (CRLF on the
 wire — the trailing LF is swallowed), Shift-Enter is byte-identical to Enter,
-**Ctrl-Enter sends LF**, Ctrl-E sends 0x05.
+**Ctrl-Enter sends LF**, Ctrl-E sends 0x05, Ctrl-S sends 0x13.
 
 ### Overlay notepad editor (`Ctrl-E`)
 
@@ -80,8 +90,13 @@ A bright-green bordered box overlays the live chat; the draft renders inside it
 from the top with soft wrap. Notepad-style caret editing: arrows move the caret
 anywhere in the box, `Enter` opens a line, `Backspace` joins, typing inserts at
 the caret. Capacity is hard-capped to the box (an edit that would not fit is
-refused — it never scrolls). `ESC` or `Ctrl-Enter` **sends** (ESC = save, per
-Dave); `Ctrl-E` carries the draft back to the chat input box.
+refused — it never scrolls). Bottom border: `Ctrl-S save / ESC cancel`.
+
+| Key | Action |
+|---|---|
+| `Ctrl-S` (or `Ctrl-Enter`) | save/send. Blank and whitespace-only lines collapse to single spacing so a pile of Enters cannot pad a tall empty bubble. |
+| `ESC` | cancel — discard overlay edits, restore the chat-box draft, go back |
+| `Ctrl-E` | return to the chat input keeping the current overlay text (does not send) |
 
 Reader (non-Social tabs): paged, threaded (`parent_id` indented), `F`ind,
 `R`eply (classic `/S` save `/A` abort line editor), `D`elete (own or mod),

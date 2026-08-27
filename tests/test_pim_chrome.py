@@ -98,6 +98,72 @@ def test_pim_shows_tabs_and_pane(tmp_path):
     assert ">" in text
 
 
+def test_social_tab_keeps_tab_bar_on_24_row_terminal(tmp_path):
+    """Social used to paint 23 pane rows; the trailing CRLF after the pane
+    scrolled a 24-row SyncTERM and the Dashboard|Social tab bar vanished."""
+    import re as _re
+
+    app = _app(tmp_path)
+    user = User(username="dave", groups=[])
+
+    async def _seed():
+        await app.conversations.create_conversation(
+            kind="board", title="General", created_by="dave", conv_id="general")
+        await app.conversations.post_message("general", author="dave", body="hello")
+
+    asyncio.run(_seed())
+    s = _session(user)
+    s._pim_active_tab = "social"
+    p = app.get_plugin("mainmenu")
+    asyncio.run(p._show_menu(s))  # type: ignore[attr-defined]
+    raw = s.writer.text()  # type: ignore[union-attr]
+
+    W, H = 80, 24
+    screen = [""] * H
+    row = col = 1
+    for tok in _re.split(r"(\x1b\[[0-9;]*[A-Za-z])", raw):
+        if not tok:
+            continue
+        if tok.startswith("\x1b["):
+            cmd = tok[-1]
+            if cmd == "H":
+                p = tok[2:-1].split(";")
+                row = int(p[0] or 1)
+                col = int(p[1] or 1) if len(p) > 1 else 1
+            elif cmd == "J":
+                screen = [""] * H
+            continue
+        for ch in tok:
+            if ch == "\r":
+                col = 1
+            elif ch == "\n":
+                row += 1
+                if row > H:
+                    raise AssertionError(
+                        f"Social redraw scrolled a 24-row terminal (row={row})"
+                    )
+            elif ch != "\x1b":
+                if 1 <= row <= H:
+                    line = screen[row - 1]
+                    if col > len(line) + 1:
+                        line += " " * (col - len(line) - 1)
+                    if col == len(line) + 1:
+                        screen[row - 1] = line + ch
+                    else:
+                        screen[row - 1] = line[: col - 1] + ch + line[col:]
+                col += 1
+                if col > W:
+                    row += 1
+                    col = 1
+                    if row > H:
+                        raise AssertionError(
+                            "Social redraw wrapped off a 24-row terminal"
+                        )
+
+    top = _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", screen[0])
+    assert "Dashboard" in top and "Social" in top, f"tab bar missing: {top!r}"
+
+
 def test_classic_fallback_when_home_mode_menu(tmp_path):
     app = _app(tmp_path)
     user = User(username="dave", groups=[], preferences={"home_mode": "menu"})

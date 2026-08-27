@@ -172,8 +172,8 @@ plugins/
 Social rooms are `kind=board` conversations. Sysops manage messages through the
 One-API ops (`conversations.*`, with `boards.*` shims) — see `docs/one-api.md`;
 in-app, Social rooms are the Telegram-style chat (see
-`plugins/mainmenu/docs/README.md` for the key map, including the Ctrl-E overlay
-editor).
+`plugins/mainmenu/docs/README.md` for the key map: overlay notepad is
+Ctrl-E, Ctrl-S save / ESC cancel).
 
 ## Monitoring
 

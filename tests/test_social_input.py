@@ -154,6 +154,69 @@ def test_n_creates_thread_enforcing_title_cap(tmp_path):
     asyncio.run(_a())
 
 
+def test_n_empty_title_silently_aborts(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _social_session(dave)
+    p = app.get_plugin("mainmenu")
+
+    async def _a():
+        before = await app.conversations.list_conversations(
+            kind="board", visible_to=dave)
+        sel_before = int(getattr(s, "_pim_selected", 0) or 0)
+        orig = runner.read_command
+
+        async def fake_rc(bbs, session, timeout=runner.IDLE_TIMEOUT):
+            return ""
+
+        runner.read_command = fake_rc  # type: ignore[assignment]
+        try:
+            assert await p._handle_pim_key(s, "N") is True
+        finally:
+            runner.read_command = orig  # type: ignore[assignment]
+        after = await app.conversations.list_conversations(
+            kind="board", visible_to=dave)
+        assert [c["id"] for c in after] == [c["id"] for c in before]
+        assert int(getattr(s, "_pim_selected", 0) or 0) == sel_before
+        text = bytes(s.writer.buf).decode("cp437", errors="replace")
+        assert "Thread title" in text
+        assert "cancelled" not in text.lower()
+        assert "created" not in text.lower()
+
+    asyncio.run(_a())
+
+
+def test_n_whitespace_title_silently_aborts(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _social_session(dave)
+    p = app.get_plugin("mainmenu")
+
+    async def _a():
+        before = await app.conversations.list_conversations(
+            kind="board", visible_to=dave)
+        orig = runner.read_command
+
+        async def fake_rc(bbs, session, timeout=runner.IDLE_TIMEOUT):
+            return " \t  "
+
+        runner.read_command = fake_rc  # type: ignore[assignment]
+        try:
+            assert await p._handle_pim_key(s, "N") is True
+        finally:
+            runner.read_command = orig  # type: ignore[assignment]
+        after = await app.conversations.list_conversations(
+            kind="board", visible_to=dave)
+        assert [c["title"] for c in after] == [c["title"] for c in before]
+        text = bytes(s.writer.buf).decode("cp437", errors="replace")
+        assert "cancelled" not in text.lower()
+        assert not any(c["title"].strip() == "" for c in after)
+
+    asyncio.run(_a())
+
+
 def test_r_and_d_retired_from_social_fall_through(tmp_path):
     """B8: R/D compose keys are gone — messaging lives in chat mode
     (Enter). Unhandled keys fall through to the generic PIM layer."""

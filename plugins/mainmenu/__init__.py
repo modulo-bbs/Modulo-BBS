@@ -28,6 +28,18 @@ from shared.telnet_protocol import ANSI
 from core import runner
 
 
+def _collapse_overlay_spacing(text: str) -> str:
+    """Save-time: drop blank (and whitespace-only) lines so double-spacing
+    and above become single-spaced. Stops tall empty bubbles from the
+    overlay editor without touching intra-line spaces."""
+    lines = []
+    for ln in (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if ln.strip() == "":
+            continue
+        lines.append(ln)
+    return "\n".join(lines)
+
+
 def user_can_access(user, requires) -> bool:
     """Menu visibility gate. Mirrors core User.can_access() for safety when
     user is None or missing (fail-closed for non-empty requirements)."""
@@ -620,19 +632,30 @@ class MainmenuPlugin(Plugin):
             return None
 
     async def _social_new_thread(self, session):
-        """Compose mode: prompt for a title (≤15 chars), then create+select."""
+        """Compose mode: prompt for a title (capped), then create+select.
+
+        Empty or whitespace-only title silently aborts back to the Social
+        list -- no conversation is created.
+        """
+        from core.conversations import SOCIAL_THREAD_TITLE_MAX
+
         while True:
-            await self.bbs.send(session, "\r\nThread title (max 15 chars): ")
+            await self.bbs.send(
+                session,
+                f"\r\nThread title (max {SOCIAL_THREAD_TITLE_MAX} chars): ",
+            )
             raw = await runner.read_command(self.bbs, session)
             if raw is None:
                 return
             title = raw.strip()
             if not title:
-                await self.bbs.send(session, "(cancelled)\r\n")
                 return
-            if len(title) > 15:
-                await self.bbs.send(session,
-                                    f"Too long ({len(title)} chars) — 15 max.\r\n")
+            if len(title) > SOCIAL_THREAD_TITLE_MAX:
+                await self.bbs.send(
+                    session,
+                    f"Too long ({len(title)} chars) - "
+                    f"{SOCIAL_THREAD_TITLE_MAX} max.\r\n",
+                )
                 continue
             conv = await self.bbs.conversations.create_conversation(
                 kind="board", title=title, created_by=session.user.username)
@@ -653,8 +676,8 @@ class MainmenuPlugin(Plugin):
         You just type; Enter posts. Ctrl-Enter (LF) inserts a newline and
         the input area grows upward, overwriting bubble rows until sent.
         Ctrl-E expands into an overlay notepad box (arrows move the caret
-        anywhere, Enter opens a line, Ctrl-Enter sends, ESC keeps the
-        draft). UP/DOWN scroll back through history (entry is always
+        anywhere, Enter opens a line, Ctrl-S saves/sends, ESC cancels).
+        UP/DOWN scroll back through history (entry is always
         tail-anchored), PgUp/PgDn page, ESC leaves. While idle the loop
         polls the store once a second, so messages from other nodes/sessions
         appear as *NEW* bubbles on every view.
@@ -875,8 +898,10 @@ class MainmenuPlugin(Plugin):
         arrows move the caret anywhere in the box, Enter opens a line,
         Backspace joins, typing inserts at the caret. Capacity is capped to
         the box — an edit that would not fit is refused.
-        ESC or Ctrl-Enter sends; Ctrl-E returns to chat keeping the draft
-        (Dave: ESC is the save key). Returns (sent, draft).
+        Ctrl-S or Ctrl-Enter saves/sends (blank lines collapse to single
+        spacing); ESC cancels (discard overlay edits, restore the draft
+        that was in the chat box); Ctrl-E returns to chat keeping the
+        current overlay text. Returns (sent, draft).
         """
         import time
 
@@ -913,11 +938,17 @@ class MainmenuPlugin(Plugin):
                     body = text[st:st + ln]
                 parts.append("\r\n" + f"{G}{vb}{RST}"
                              + (" " + body).ljust(Wid) + f"{G}{vb}{RST}")
-            parts.append("\r\n" + f"{G}{bl}{hb * Wid}{br}{RST}")
+            hint = " Ctrl-S save / ESC cancel "
+            pad_l = max(0, (Wid - len(hint)) // 2)
+            pad_r = max(0, Wid - pad_l - len(hint))
+            parts.append(
+                "\r\n" + f"{G}{bl}{hb * pad_l}{RST}{hint}{G}{hb * pad_r}{br}{RST}"
+            )
             r, c = _caret_cell(rows, min(off, len(text)))
             parts.append(f"\x1b[{top + 1 + r};{L + 1 + c}H")
             return "".join(parts)
 
+        original = draft
         text, off = draft, len(draft)
 
         def fits(cand: str) -> bool:
@@ -936,10 +967,12 @@ class MainmenuPlugin(Plugin):
             last_key_at = time.monotonic()
             rows = wrap_rows(text, inner_w)
 
-            if key == "LF" or key == "ESC":
-                return True, text           # send (Dave: ESC is the save key)
+            if key == "LF" or key == "CTRL_S":
+                return True, _collapse_overlay_spacing(text)  # save/send
+            if key == "ESC":
+                return False, original      # cancel: discard overlay edits
             if key == "CTRL_E":
-                return False, text          # back to chat, draft kept
+                return False, text          # back to chat, overlay text kept
             if key == "ENTER":
                 # Swallow a CRLF client's trailing LF (same as the chat's
                 # ENTER branch) or it surfaces as "LF" — an instant send.

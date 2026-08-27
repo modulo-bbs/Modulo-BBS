@@ -202,3 +202,17 @@ def test_ctrl_e_surfaces_for_full_editor():
         assert await runner.read_key(bb, s) == "B"
 
     asyncio.run(_a())
+
+
+def test_ctrl_s_surfaces_for_overlay_save():
+    async def _a():
+        r = _reader()
+        r.feed_data("a\x13b".encode("cp437"))
+        r.feed_eof()
+        s = _session(r)
+        bb = RecordingBBS()
+        assert await runner.read_key(bb, s) == "A"
+        assert await runner.read_key(bb, s) == "CTRL_S"
+        assert await runner.read_key(bb, s) == "B"
+
+    asyncio.run(_a())

@@ -182,7 +182,7 @@ async def read_key(
     ``None`` on EOF/timeout. Arrow keys are normalized to ``UP``/``DOWN``/
     ``LEFT``/``RIGHT``; Enter (CR) is ``ENTER``; LF (SyncTERM Ctrl-Enter)
     is ``"LF"`` (chat multi-line newline); Ctrl-E is ``"CTRL_E"`` (chat
-    full-screen compose editor). A bare ESC with no
+    overlay editor); Ctrl-S is ``"CTRL_S"`` (overlay save). A bare ESC with no
     follow-up byte within :data:`ESC_KEY_WINDOW` returns ``"ESC"`` (B0:
     Social's back key); a fast-following byte still parses as its sequence.
     BACKSPACE (DEL/BS) is ``"BACKSPACE"``. Chat mode reads with
@@ -222,7 +222,10 @@ async def read_key(
             return "SPACE"  # B4: PgDn alias on Social
         if buf[0] == "\x05":
             session._line_buffer = buf[1:]
-            return "CTRL_E"  # full-screen compose editor (Social chat)
+            return "CTRL_E"  # overlay compose editor (Social chat)
+        if buf[0] == "\x13":
+            session._line_buffer = buf[1:]
+            return "CTRL_S"  # overlay save/send
         ch, buf = buf[0], buf[1:]
         session._line_buffer = buf
         if ch in ("\x7f", "\x08"):
@@ -281,7 +284,10 @@ async def read_key(
                 return "SPACE"  # B4: PgDn alias on Social
             if ch == "\x05":
                 session._line_buffer = buf[i + 1 :]
-                return "CTRL_E"  # full-screen compose editor (Social chat)
+                return "CTRL_E"  # overlay compose editor (Social chat)
+            if ch == "\x13":
+                session._line_buffer = buf[i + 1 :]
+                return "CTRL_S"  # overlay save/send
             if ch == "\x1b":
                 # start of an ESC sequence — wait, but only briefly
                 # (B0: silence resolves to a lone "ESC" keypress)

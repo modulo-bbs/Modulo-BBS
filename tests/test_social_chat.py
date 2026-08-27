@@ -13,7 +13,7 @@ import pytest
 from core import runner
 from core.app import BBSApp
 from core.user import User
-from plugins.mainmenu import MainmenuPlugin
+from plugins.mainmenu import MainmenuPlugin, _collapse_overlay_spacing
 from server.session import Session
 
 
@@ -388,21 +388,54 @@ def test_ctrl_e_opens_notepad_and_ctrl_enter_sends(tmp_path):
     text = _plain(s)
     assert "+----" in text or "\u250c" in bytes(s.writer.buf)  # box drawn
     msgs = asyncio.run(app.conversations.list_messages("b1"))
-    assert msgs[-1]["body"] == "hi\n\nworld"   # blank line preserved
+    assert msgs[-1]["body"] == "hi\nworld"   # double-spacing collapsed at save
     assert msgs[-1]["author"] == "dave"
 
 
-def test_notepad_esc_sends_and_ctrl_e_carries_back(tmp_path):
+def test_notepad_save_collapses_blank_lines_to_single_spacing():
+    assert _collapse_overlay_spacing("up\n\n\n\ndown") == "up\ndown"
+    assert _collapse_overlay_spacing("up\n   \n\ndown") == "up\ndown"
+    assert _collapse_overlay_spacing("keep\nthis") == "keep\nthis"
+    assert _collapse_overlay_spacing("  indented") == "  indented"
+
+
+def test_notepad_ctrl_s_collapses_tomfoolery_blank_lines(tmp_path):
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
     s = _session(dave)
-    # ESC is the save key: draft "hi" + editor "xy" -> ESC posts "hixy";
-    # second ESC exits the chat.
+    keys = (
+        ["CTRL_E"] + list("up") + ["ENTER"] * 8 + list("down") + ["CTRL_S", "ESC"]
+    )
+    _run_chat_with_editor(s, app, {"id": "b1", "title": "General"}, iter(keys))
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert msgs[-1]["body"] == "up\ndown"
+
+
+def test_notepad_esc_cancels_without_sending(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    # ESC cancels the overlay: "xy" is discarded, chat-box "hi" is restored,
+    # second ESC leaves chat with nothing posted.
+    before = asyncio.run(app.conversations.list_messages("b1"))
     keys = ["h", "i", "CTRL_E"] + list("xy") + ["ESC", "ESC"]
     _run_chat_with_editor(s, app, {"id": "b1", "title": "General"}, iter(keys))
     msgs = asyncio.run(app.conversations.list_messages("b1"))
+    assert msgs == before
+
+
+def test_notepad_ctrl_s_saves_and_sends(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    keys = ["h", "i", "CTRL_E"] + list("xy") + ["CTRL_S", "ESC"]
+    _run_chat_with_editor(s, app, {"id": "b1", "title": "General"}, iter(keys))
+    msgs = asyncio.run(app.conversations.list_messages("b1"))
     assert msgs[-1]["body"] == "hixy"
+    assert "Ctrl-S save / ESC cancel" in _plain(s)
 
 
 def test_notepad_ctrl_e_carries_draft_back_to_chat_box(tmp_path):
@@ -455,7 +488,7 @@ def test_notepad_capacity_capped_to_box(tmp_path):
 
     async def _a():
         # editor is entered directly: no leading CTRL_E (the chat eats it).
-        # Ctrl-E exits keeping the draft (ESC would now send).
+        # Ctrl-E exits keeping the draft (ESC would cancel).
         keys = iter(["x"] * 200 + ["CTRL_E"])
         orig = runner.read_key
 
@@ -519,6 +552,6 @@ def test_notepad_enter_swallows_crlf_trailing_lf(tmp_path):
         finally:
             runner.read_key = orig  # type: ignore[assignment]
         assert posted is True
-        assert draft == "\nx"      # one newline, then x — no premature send
+        assert draft == "x"        # leading blank collapsed; no premature send
 
     asyncio.run(_a())

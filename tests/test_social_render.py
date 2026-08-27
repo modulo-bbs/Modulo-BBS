@@ -93,8 +93,11 @@ def test_plain_layout_widths_and_rows():
         lines = out.split("\r\n")
         _all_lines_79(lines)
         joined = out
-        # sidebar furniture
-        assert "DMs" in joined and "+ new thread" in joined
+        # sidebar furniture: DMs pinned, then separator, then rooms.
+        # "+ new thread" is not a row -- N in the hint creates threads.
+        assert "DMs" in joined
+        assert "+ new thread" not in joined
+        assert "N new thread" in joined
         # board row selected marker + unread star, title capped at 15
         assert "> General Discuss" in joined and "*" in joined
         # thread pane: compact bubbles, author-only title bars (B8)
@@ -102,6 +105,17 @@ def test_plain_layout_widths_and_rows():
         assert "dave" in joined and "api_test" in joined
         # long body got wrapped inside the pane, not truncated mid-word garbage
         assert "deliberately" in joined
+        # DMs is immediately followed by the separator, not an action row
+        side = []
+        for ln in lines:
+            v = vis(ln)
+            if v.startswith("│") and len(v) == 79:
+                side.append(v[1:23])
+        dms_i = next(i for i, cell in enumerate(side) if "DMs" in cell)
+        assert dms_i + 1 < len(side)
+        sep = side[dms_i + 1]
+        assert set(sep.strip()) <= set("-─ ")
+        assert "new" not in sep.lower()
 
     asyncio.run(_a())
 
@@ -159,5 +173,22 @@ def test_empty_room_shows_placeholder():
         s = _session(User(username="dave"), sel=1)
         out = await render_social(c, s)
         assert "(no messages yet" in out
+
+    asyncio.run(_a())
+
+
+def test_pane_leaves_rows_for_tab_bar_and_prompt():
+    """Social pane + tab bar + trailing CRLF must not fill 24 rows.
+
+    `_show_menu` paints the tab bar, then this pane, then a trailing CRLF,
+    then CUPs the prompt onto the last line. A 23-line pane scrolled
+    SyncTERM and the tab bar disappeared.
+    """
+    async def _a():
+        s = _session(User(username="dave"), h=24, sel=1)
+        out = await render_social(StubConvs(), s)
+        lines = out.split("\r\n")
+        assert len(lines) == 22, f"expected 22 pane lines, got {len(lines)}"
+        _all_lines_79(lines)
 
     asyncio.run(_a())

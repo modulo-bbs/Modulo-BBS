@@ -5,13 +5,14 @@ module owns the *model*: which rooms exist for a viewer, in what order,
 and what is unread. Pure data — rendering lives in the chrome, input in
 the PIM dispatcher.
 
-Sidebar shape (per plan §Design):
+Sidebar shape:
 
     > DMs             N   <- pinned aggregate (all kind=dm convs)
-      + new thread       ← UI action row, added by the renderer
     ──────────────────
-      1 General Dis…  *  ← kind=board rooms by recent activity
-      2 Trading Post
+      General Discus  *  <- kind=board rooms by recent activity
+      Trading Post
+
+New threads are created with N (see SOCIAL_HINT), not a fake sidebar row.
 """
 from __future__ import annotations
 
@@ -145,9 +146,12 @@ async def render_social(conversations, session) -> str:
     if sel < 0:
         sel = 0
 
-    # Row budget: tab bar + top + bottom + hint consume 4 rows of the frame.
-    content_rows = max(8, h - 4)
-    sidebar_slots = content_rows - 3  # DMs row + new-thread + separator
+    # Row budget: tab bar + funnel + bottom + hint + prompt = 5 chrome rows.
+    # `_show_menu` sends tab_bar + pane + trailing CRLF, then CUPs the prompt
+    # onto the last terminal line. Filling h-4 made the pane 23 lines; the
+    # extra CRLF scrolled a 24-row SyncTERM and the tab bar vanished.
+    content_rows = max(8, h - 5)
+    sidebar_slots = content_rows - 2  # DMs row + separator
     pane_rows_n = content_rows - 2    # room header + separator
 
     # -- resolve highlighted room -> thread conversation ---------------------
@@ -236,7 +240,6 @@ async def render_social(conversations, session) -> str:
 
     marker = ">" if sel == 0 else " "
     side.append(f"{marker} {'DMs':<15}{dms_unread:>3}")
-    side.append("  + new thread")
     side.append("─" * SID_INNER if not is_plain else "-" * SID_INNER)
     for i, r in enumerate(shown):
         marker = ">" if sel == i + 1 else " "
@@ -253,7 +256,7 @@ async def render_social(conversations, session) -> str:
         pane.append("─" * PANE_INNER if not is_plain else "-" * PANE_INNER)
         pane.extend(window)
         if not window:
-            pane.append("(no messages yet — N posts first)")
+            pane.append("(no messages yet - N posts first)")
     else:
         pane.append("(select a room)")
 
@@ -280,7 +283,7 @@ async def render_social(conversations, session) -> str:
             return False
         if row_idx == 0:
             return sel == 0
-        board_idx = row_idx - 3  # rows 1,2 are the action + separator
+        board_idx = row_idx - 2  # row 1 is the separator
         return board_idx >= 0 and sel == board_idx + 1
 
     rows: list[str] = []
