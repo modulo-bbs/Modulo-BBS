@@ -41,7 +41,8 @@ modal picker. Other commands paint in a notice overlay; any key dismisses.
 ## Keys (PIM)
 
 - `1`/`2`/`3`/`4`/`5` and `LEFT`/`RIGHT` / `H`/`L` — switch tab
-- Remaining keys go to the active home plugin (Social chat, Files list, …)
+- Remaining keys go to the active home plugin (Social thread, Files list, …)
+- Idle 1s redraw (new Social mail appears without leaving the tab)
 - `/` — slash command
 - `Q` — disconnect; `I` — system info; `X` — shutdown (sysop, classic or fall-through)
 

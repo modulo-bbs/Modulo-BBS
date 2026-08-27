@@ -23,6 +23,12 @@ class FakeWriter:
     async def drain(self):
         pass
 
+    def close(self):
+        self.closed = True
+
+    async def wait_closed(self):
+        pass
+
 
 def _app(tmp_path: Path) -> BBSApp:
     app = BBSApp(users_dir=tmp_path / "users")
@@ -222,3 +228,44 @@ def test_slash_theme_picker_enter_applies(tmp_path):
         assert s.user.preferences.get("theme") == "amber"
 
     asyncio.run(_a())
+
+
+def test_pim_idle_poll_refreshes_social_preview(tmp_path):
+    """Sitting on a highlighted room sees new mail without switching tabs."""
+    from core import runner
+
+    app = _app(tmp_path)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    s._pim_active_tab = "social"
+    s._pim_selected = 1
+    p = app.get_plugin("mainmenu")
+    assert p is not None
+
+    async def _a():
+        await app.conversations.create_conversation(
+            kind="board", title="General", created_by="dave", conv_id="b1")
+        await app.conversations.post_message(
+            "b1", author="ana", body="hello room")
+        n = 0
+        orig = runner.read_key
+
+        async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
+            nonlocal n
+            n += 1
+            if n == 1:
+                await app.conversations.post_message(
+                    "b1", author="api_test", body="while you looked")
+                return None
+            return "Q"
+
+        runner.read_key = fake_rk  # type: ignore[assignment]
+        try:
+            await p.on_session_start(s)
+        finally:
+            runner.read_key = orig  # type: ignore[assignment]
+
+    asyncio.run(_a())
+    text = bytes(s.writer.buf).decode("cp437", errors="replace")
+    assert "hello room" in text
+    assert "while you looked" in text

@@ -259,14 +259,27 @@ class MainmenuPlugin(Plugin):
             session.state = SessionState.MAIN_MENU
         self.bbs.events.emit("menu:open", {"session": session, "menu_name": "main"})
 
+        import time
+
+        last_key_at = time.monotonic()
         while session.is_active:
             await self._show_menu(session)
             # Single keypress, no Enter -- menu keys are one character.
             # PIM navigation is handled here; classic keys fall through to
-            # _handle().
-            key = await runner.read_key(self.bbs, session)
+            # _handle(). PIM idles with a 1s poll so Social (and other
+            # panes) pick up new mail without switching tabs.
+            if self._is_pim(session):
+                key = await runner.read_key(
+                    self.bbs, session,
+                    timeout=1.0, idle_on_timeout=False,
+                )
+            else:
+                key = await runner.read_key(self.bbs, session)
             if key is None:
-                break
+                if time.monotonic() - last_key_at > runner.IDLE_TIMEOUT:
+                    break
+                continue
+            last_key_at = time.monotonic()
             if key == "/":
                 # The `>` is a hotkey prompt, not a shell. `/` switches that
                 # one key into a line read: type `theme` or `theme amber` and
