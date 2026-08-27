@@ -490,7 +490,8 @@ class SocialPlugin(Plugin):
                 "\r\n" + f"{G}{bl}{hb * pad_l}{RST}{hint}{G}{hb * pad_r}{br}{RST}"
             )
             r, c = _caret_cell(rows, min(off, len(text)))
-            parts.append(f"\x1b[{top + 1 + r};{L + 1 + c}H")
+            # Col L is the left border, L+1 the gutter space, text at L+2.
+            parts.append(f"\x1b[{top + 1 + r};{L + 2 + c}H")
             return "".join(parts)
 
         text, off = draft, len(draft)

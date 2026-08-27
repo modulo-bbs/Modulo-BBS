@@ -554,6 +554,41 @@ def test_tall_draft_collapses_to_preview_then_posts(tmp_path):
     assert msgs[-1]["body"] == "a" * 240
 
 
+def test_notepad_caret_sits_after_last_character(tmp_path):
+    """Gutter is one column; CUP lands after the last glyph, not on it."""
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _session(dave)
+    p = app.get_plugin("social")
+
+    async def _a():
+        keys = iter(["ESC"])
+        orig = runner.read_key
+
+        async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
+            return next(keys)
+
+        runner.read_key = fake_rk  # type: ignore[assignment]
+        try:
+            await p._social_overlay_editor(
+                s, {"id": "b1", "title": "General"}, "test")
+        finally:
+            runner.read_key = orig  # type: ignore[assignment]
+
+    asyncio.run(_a())
+    import re as _re
+
+    cups = _re.findall(
+        r"\x1b\[(\d+);(\d+)H",
+        bytes(s.writer.buf).decode("cp437", errors="replace"),
+    )
+    assert cups
+    row, col = cups[-1]
+    assert int(row) == 3
+    assert int(col) == 7
+
+
 def test_notepad_arrows_insert_midline(tmp_path):
     app = _app(tmp_path)
     _seed(app)
