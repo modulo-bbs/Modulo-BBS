@@ -140,13 +140,6 @@ def _hint_for_session(session) -> str:
     return " \x18\x19\x1B\x1A/WASD select "
 
 
-def _chrome_chars(is_plain: bool) -> tuple[str, str, str]:
-    """Vertical, rule, and funnel-close glyphs for the tab/funnel rows."""
-    if is_plain:
-        return "|", "-", "\\"
-    return "│", "─", "┐"
-
-
 def _flow_cells(labels, hint, active_idx):
     """Flow-tab layout math (Dave's algorithm, pure len()).
 
@@ -164,30 +157,25 @@ def _flow_cells(labels, hint, active_idx):
 
 
 def _build_top(labels, active_idx, hint, is_plain, screen_width=79, session=None):
-    """Funnel/head row: rule whose opening bar sits under the active tab's
-    opening bar and whose close sits under the tab's closing bar —
-    everything below belongs to this heading. Slides with the active tab.
+    """Rule under the tab row, with the hint sitting in the active tab's
+    inner slot. No extra bars or corners — those read as stray glyphs.
     """
     _w, x, slot = _flow_cells(labels, hint, active_idx)
-    pipe, fill, close = _chrome_chars(is_plain)
-    head = pipe + " " + hint.center(slot) + " " + close
-    if x <= 0:
-        left = ""
-    elif is_plain:
-        left = fill * x
-    else:
-        # Stack with the pane's left │; a run of ─ here looked like a stray
-        # stub on UTF-8 (tab |, funnel ─, pane │).
-        left = pipe + fill * (x - 1)
-    right = fill * max(0, screen_width - x - len(head))
-    row = (left + head + right)[:screen_width].ljust(screen_width, fill)
+    fill = "-" if is_plain else "─"
+    inner = hint.center(slot)
+    start = x + 2  # skip the tab cell's "| "
+    row = fill * screen_width
+    if 0 <= start <= screen_width:
+        end = min(screen_width, start + len(inner))
+        row = row[:start] + inner[: end - start] + row[end:]
+    row = row[:screen_width]
     if is_plain:
         return row
     p = palette_for(session)
-    hl = len(head)
-    return (f"{p.muted}{row[:x]}{p.reset}"
-            f"{p.text}{row[x:x+hl]}{p.reset}"
-            f"{p.muted}{row[x+hl:]}{p.reset}")
+    a, b = max(0, start), min(screen_width, start + len(inner))
+    return (f"{p.muted}{row[:a]}{p.reset}"
+            f"{p.text}{row[a:b]}{p.reset}"
+            f"{p.muted}{row[b:]}{p.reset}")
 
 
 def _list_row(disp: str, selected: bool, is_plain: bool, pal) -> str:
@@ -399,7 +387,6 @@ class MainmenuPlugin(Plugin):
         active_idx = max(0, next((i for i, x in enumerate(tabs) if x["id"] == active_id), 0))
         hint = _hint_for_session(session)
         widths, _x, _s = _flow_cells(labels, hint, active_idx)
-        pipe, _fill, _close = _chrome_chars(is_plain)
         parts = []
         for i, tb in enumerate(tabs):
             lab = tb["label"]
@@ -410,7 +397,7 @@ class MainmenuPlugin(Plugin):
                 parts.append(f"{p.tab_fg}{p.tab_bg}{cell}{p.reset}")
             else:
                 parts.append(f"{p.muted}{cell}{p.reset}")
-        row = "".join(f"{pipe} {c} {pipe} " for c in parts)
+        row = "".join(f"| {c} | " for c in parts)
         vis = 5 * len(parts) + sum(widths)
         return row + " " * max(0, 79 - vis)
 

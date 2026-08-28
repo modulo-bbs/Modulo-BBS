@@ -84,27 +84,18 @@ def test_pim_shows_tabs_and_pane(tmp_path):
     # pane border + hint (arrows+WASD on CP437 and UTF-8; WASD on plain)
     assert "select" in text.lower()
 
-    # top border: funnel open/close sit directly below the ACTIVE cell's
-    # opening and closing bars (Dave's flow-tab model — cells are '| label | ')
+    # hint sits in the active tab's inner slot — no extra | or corner on the rule
     import re as _re
     def _vis(line: str) -> str:
         return _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line)
-    def _bars(line: str) -> list[int]:
-        return [i for i, ch in enumerate(line) if ch in "|│"]
     tab_line = _vis(next(l for l in text.splitlines() if "Dashboard" in l))
-    pipes = _bars(tab_line)
+    pipes = [i for i, ch in enumerate(tab_line) if ch == "|"]
     assert pipes, "tab bar has no delimiters"
     top_line = next(l for l in text.splitlines() if "select" in l)
     stripped = _vis(top_line)
-    # active tab is Dashboard (index 0) -> its cell pipes are pipes[0], pipes[1]
-    head_pipes = _bars(stripped)
-    closes = [i for i, ch in enumerate(stripped) if ch in "\\┐"]
-    assert head_pipes and head_pipes[0] == pipes[0], (
-        f"funnel pipe {head_pipes[:1]} != active tab pipe {pipes[0]}"
-    )
-    assert closes and closes[0] == pipes[1], (
-        f"funnel close {closes[:1]} != active tab close {pipes[1]}"
-    )
+    inner = stripped[pipes[0] + 2 : pipes[1] - 1]
+    assert "select" in inner.lower()
+    assert "\\" not in stripped and "┐" not in stripped
     # pane content includes the seeded message preview
     assert "hello world" in text or "General" in text or "dave" in text
     # prompt is pinned at bottom (contains >)
@@ -179,8 +170,8 @@ def test_social_tab_keeps_tab_bar_on_24_row_terminal(tmp_path):
     assert "Dashboard" in top and "Social" in top, f"tab bar missing: {top!r}"
 
 
-def test_utf8_social_funnel_connects_left_edge(tmp_path):
-    """UTF-8 used to mix ASCII | \\ on a ─ rule, leaving a stub at col 0."""
+def test_utf8_social_hint_sits_under_tab_without_corners(tmp_path):
+    """The old funnel | hint \\ (then │ hint ┐) read as stray chrome."""
     import re as _re
 
     app = _app(tmp_path)
@@ -196,18 +187,14 @@ def test_utf8_social_funnel_connects_left_edge(tmp_path):
     lines = [vis(ln) for ln in raw.split("\r\n") if vis(ln).strip()]
     tab = next(ln for ln in lines if "Social" in ln and "Dashboard" in ln)
     funnel = next(ln for ln in lines if "select" in ln)
-    pane = next(ln for ln in lines if ln.startswith("│") and "DMs" in ln)
-    assert tab.startswith("│"), tab
-    assert funnel.startswith("│"), funnel
-    assert pane.startswith("│"), pane
-    assert "↑" in funnel and "\\" not in funnel
-    assert "┐" in funnel
-    bars = [i for i, ch in enumerate(tab) if ch == "│"]
-    funnel_bars = [i for i, ch in enumerate(funnel) if ch == "│"]
-    close = funnel.index("┐")
-    # Social is tab 1: opening bar matches, close sits on the tab's close
-    assert funnel_bars[1] == bars[2]
-    assert close == bars[3]
+    assert tab.startswith("|"), tab
+    assert funnel.startswith("─"), funnel
+    assert "↑" in funnel
+    assert "\\" not in funnel and "┐" not in funnel and "|" not in funnel
+    pipes = [i for i, ch in enumerate(tab) if ch == "|"]
+    # Social is tab 1: pipes[2] open, pipes[3] close
+    inner = funnel[pipes[2] + 2 : pipes[3] - 1]
+    assert "select" in inner
 
 
 def test_classic_fallback_when_home_mode_menu(tmp_path):
