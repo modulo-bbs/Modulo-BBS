@@ -38,5 +38,15 @@ venv/bin/python -c "from core.version import display; print(display())"
 ```
 
 Bind on the host (not the Cursor sandbox) or SyncTERM will not see
-127.0.0.1. Do not use `pkill`. `kill -TERM` the python PID that owns
-6400/6422.
+127.0.0.1.
+
+Stop or restart the board with the soft API first (connected users get
+a goodbye):
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/shutdown
+```
+
+Optional JSON body: `{"message": "..."}`. Do not use `pkill`. `kill
+-TERM` on the python PID that owns 6400/6422 is last resort only — if
+the API is down or the process ignores shutdown. Never `-9`.
