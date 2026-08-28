@@ -121,30 +121,26 @@ def decode_in(data: bytes, encoding: str) -> str:
 PROBE_PREFIX = "\x1b[1;1H\x1b[K"    # home cursor to col 1; clear line
 PROBE_SEQUENCE = "\x1b[s\x1b[6n"   # save cursor; device status report
 PROBE_CHAR = "é"                    # U+00E9: exactly 2 bytes in UTF-8
+PROBE_BOX = "│"                     # U+2502: Ambiguous width (1 or 2 cells)
 PROBE_CLEAR = "\x1b[u\x1b[K"        # restore cursor; erase to EOL
 
 
-async def probe_utf8(bbs, session, timeout: float = 1.5) -> str | None:
-    """Actively probe whether the client decodes UTF-8.
+def _append_pushback(session, extra: bytes) -> None:
+    prev = getattr(session, "_codec_pushback", b"") or b""
+    setattr(session, "_codec_pushback", bytes(prev) + extra)
 
-    Moves the cursor to a known column (row 2, col 1) first, so the DSR
-    reply column is directly comparable: a UTF-8 client renders é as ONE
-    glyph and reports col 2; a byte-oriented client consumes TWO bytes and
-    reports col 3. Returns "utf-8", "cp437", or None (no DSR answer).
-    Never raises.
-    """
+
+async def _dsr_column_after(bbs, session, char: str, timeout: float) -> int | None:
+    """Write *char* at column 1 and return the DSR column, or None."""
     reader = getattr(session, "reader", None)
     writer = getattr(session, "writer", None)
     if reader is None or writer is None or writer.is_closing():
         return None
 
-    # Probe bytes must go out raw regardless of session codec. Position on
-    # row 2 col 1 (below the banner) so we don't disturb visible content,
-    # then emit the character and ask where the cursor landed.
     try:
         payload = (
             PROBE_PREFIX.encode("ascii")
-            + PROBE_CHAR.encode("utf-8")
+            + char.encode("utf-8")
             + b"\x1b[6n"
         )
         writer.write(payload)
@@ -152,10 +148,6 @@ async def probe_utf8(bbs, session, timeout: float = 1.5) -> str | None:
     except Exception:  # noqa: BLE001
         return None
 
-    # Collect the DSR reply: ESC [ <row> ; <col> R. Anything else we read
-    # (e.g. the user typed ahead while the probe ran) is PUSHED BACK onto
-    # ``session._codec_pushback`` so the normal line readers serve it next —
-    # the probe must never swallow keystrokes.
     reply = bytearray()
     leftover = bytearray()
     deadline = asyncio.get_event_loop().time() + timeout
@@ -170,7 +162,7 @@ async def probe_utf8(bbs, session, timeout: float = 1.5) -> str | None:
         remaining = deadline - asyncio.get_event_loop().time()
         try:
             chunk = await asyncio.wait_for(reader.read(32), timeout=max(0.05, remaining))
-        except Exception:  # noqa: BLE001 - timeout or transient read error
+        except Exception:  # noqa: BLE001
             break
         if not chunk:
             break
@@ -178,30 +170,53 @@ async def probe_utf8(bbs, session, timeout: float = 1.5) -> str | None:
         found = _parse(bytes(reply))
         if found is not None:
             start, end, _, col = found
-            # Everything before the DSR reply, plus everything after it,
-            # belongs to the user's input stream — push it back.
             leftover += reply[:start]
             leftover += reply[end:]
-            setattr(session, "_codec_pushback", bytes(leftover))
-            await bbs.send_raw(session, PROBE_CLEAR.encode("ascii"))
-            # Started at col 1: UTF-8 renders 1 glyph -> col 2.
-            return "utf-8" if col <= 2 else "cp437"
-        # No complete DSR yet: keep only a plausible trailing fragment (an
-        # unterminated ESC[ sequence); older bytes are plain user input.
+            if leftover:
+                _append_pushback(session, bytes(leftover))
+            try:
+                await bbs.send_raw(session, PROBE_CLEAR.encode("ascii"))
+            except Exception:  # noqa: BLE001
+                pass
+            return col
         tail = bytes(reply)
         cut = max(tail.rfind(b"\x1b"), 0)
         if len(tail) - cut > 16 or b"\x1b" not in tail:
-            leftover += tail[:len(tail)]
+            leftover += tail
             reply.clear()
 
-    # No DSR answer — client doesn't do DSR. Return anything we swallowed.
-    if leftover:
-        setattr(session, "_codec_pushback", bytes(leftover) + bytes(reply))
+    if leftover or reply:
+        _append_pushback(session, bytes(leftover) + bytes(reply))
     try:
         await bbs.send_raw(session, PROBE_CLEAR.encode("ascii"))
     except Exception:  # noqa: BLE001
         pass
     return None
+
+
+async def probe_utf8(bbs, session, timeout: float = 1.5) -> str | None:
+    """Actively probe whether the client decodes UTF-8.
+
+    Emits ``é`` (2 UTF-8 bytes) at column 1, then DSR. A UTF-8 client
+    renders one glyph (col 2); a byte-oriented client advances two (col 3).
+    Returns ``"utf-8"``, ``"cp437"``, or None. Never raises.
+    """
+    col = await _dsr_column_after(bbs, session, PROBE_CHAR, timeout)
+    if col is None:
+        return None
+    return "utf-8" if col <= 2 else "cp437"
+
+
+async def probe_ambiguous_width(bbs, session, timeout: float = 1.5) -> bool | None:
+    """Whether box-drawing ``│`` occupies two cells, or None if DSR is silent.
+
+    Started at column 1: col 2 = one cell, col 3 = two cells. Callers should
+    treat None as two cells for UTF-8 so a mute telnet client cannot wrap.
+    """
+    col = await _dsr_column_after(bbs, session, PROBE_BOX, timeout)
+    if col is None:
+        return None
+    return col >= 3
 
 
 def take_pushback(session) -> bytes:

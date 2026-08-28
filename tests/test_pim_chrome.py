@@ -192,8 +192,11 @@ def test_utf8_social_hint_sits_under_tab_without_corners(tmp_path):
     assert "↑" in funnel
     assert "\\" not in funnel and "┐" not in funnel and "|" not in funnel
     pipes = [i for i, ch in enumerate(tab) if ch == "|"]
-    # Social is tab 1: pipes[2] open, pipes[3] close
-    inner = funnel[pipes[2] + 2 : pipes[3] - 1]
+    # Social is tab 1: pipes[2] open, pipes[3] close — tab row is ASCII so
+    # codepoint == display. Funnel dashes are Ambiguous; slice by display col.
+    from shared.visible import slice_display
+
+    inner = slice_display(funnel, pipes[2] + 2, pipes[3] - 1, wide_ambiguous=False)
     assert "select" in inner
 
 

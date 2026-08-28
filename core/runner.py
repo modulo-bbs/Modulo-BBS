@@ -15,9 +15,10 @@ Input model (two distinct modes):
 
 Echo policy: SSH echoes keystrokes at the transport layer (``data_received``
 bridge); telnet also echoes the *clean* payload in :func:`_read_chunk`
-(printable as-is, backspace in place). Secret fields set ``session.echo_mask``
-to ``"*"`` and briefly ``WILL ECHO`` so SyncTERM stops local-echoing the
-password. :func:`read_command` applies backspace/DEL to the line buffer —
+(printable as-is, backspace in place). The telnet handshake ``WILL ECHO``
+so Linux telnet drops local echo (otherwise every keystroke prints twice).
+Secret fields set ``session.echo_mask`` to ``"*"`` (stars, not plaintext).
+:func:`read_command` applies backspace/DEL to the line buffer —
 painting ``\\b \\b`` without dropping the byte was why a mistyped-then-
 corrected password still failed.
 """
@@ -130,7 +131,8 @@ async def secret_echo(bbs, session, mask: str | None):
     finally:
         session.echo_mask = prev
         session._echoed_cols = 0
-        await _offer_server_echo(bbs, session, False)
+        # Leave WILL ECHO on — WONT would restore client local echo and
+        # double-print the next field against runner's server echo.
 
 
 def _idle(bbs, session) -> None:

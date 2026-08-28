@@ -6,7 +6,7 @@ and every session stayed terminal_type="UNKNOWN" (plain ASCII fallback).
 """
 from shared.telnet_protocol import (
     TelnetNegotiator,
-    IAC, SB, SE, DO, WILL, OPT_TERMINAL_TYPE, OPT_WINDOW_SIZE,
+    IAC, SB, SE, DO, WILL, OPT_TERMINAL_TYPE, OPT_WINDOW_SIZE, OPT_ECHO,
 )
 
 
@@ -50,7 +50,9 @@ def test_full_syncterm_handshake_yields_ansi_bbs():
     """End-to-end: initial negotiation -> WILL -> SB SEND -> IS."""
     neg = TelnetNegotiator()
     # Server opens with initial_negotiation (DO TTYPE among others)
-    assert bytes([IAC, DO, OPT_TERMINAL_TYPE]) in neg.initial_negotiation()
+    handshake = neg.initial_negotiation()
+    assert bytes([IAC, DO, OPT_TERMINAL_TYPE]) in handshake
+    assert bytes([IAC, WILL, OPT_ECHO]) in handshake
     # Client agrees
     neg.process_data(_client_will_ttype())
     # Client answers the SB SEND with IS

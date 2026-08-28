@@ -1,22 +1,22 @@
 """B3 — Social two-pane renderer (boards-unification §B3).
 
-Layout contract: every emitted line is exactly 79 visible columns.
-Sidebar cell 22 cols | thread pane 54 cols inside the standard chrome.
+Layout contract: every emitted line is exactly 79 display columns.
+Sidebar cell 22 cols | thread pane 54 cols (CP437 / 1-cell glyphs).
+UTF-8 Ambiguous box drawing is 2 cells; pane shrinks so the box still
+stacks on the same screen columns.
 """
 from __future__ import annotations
 
 import asyncio
-import re
 from types import SimpleNamespace
 
 from core.user import User
 from plugins.social.social import focus_arrows, gutter_stack, render_social
-
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+from shared.visible import at_display, display_width, strip_ansi
 
 
 def vis(line: str) -> str:
-    return _ANSI_RE.sub("", line)
+    return strip_ansi(line) if line else ""
 
 
 class StubConvs:
@@ -82,12 +82,13 @@ def _session(user=None, h=24, plain=True, sel=0):
     )
 
 
-def _all_lines_79(lines):
+def _all_lines_79(lines, wide=False):
     for ln in lines:
         v = vis(ln)
         if not v.startswith(("│", "+", "└")):
             continue  # tab bar above / hint below are not box rows
-        assert len(v) == 79, f"bad width {len(v)}: {ln!r}"
+        w = display_width(ln, wide_ambiguous=wide)
+        assert w == 79, f"bad width {w} (codepoints {len(v)}): {v!r}"
 
 
 def test_plain_layout_widths_and_rows():
@@ -112,10 +113,11 @@ def test_plain_layout_widths_and_rows():
         # long body got wrapped inside the pane, not truncated mid-word garbage
         assert "deliberately" in joined
         # DMs is immediately followed by the separator, not an action row
+        wide = False
         side = []
         for ln in lines:
             v = vis(ln)
-            if v.startswith("│") and len(v) == 79:
+            if v.startswith("│") and display_width(ln, wide_ambiguous=wide) == 79:
                 side.append(v[1:23])
         dms_i = next(i for i, cell in enumerate(side) if "DMs" in cell)
         assert dms_i + 1 < len(side)
@@ -178,13 +180,17 @@ def test_selection_follows_room_when_activity_reorders():
     asyncio.run(_a())
 
 
-def _mid_gutter(out: str) -> str:
-    """Visible chars of the 1-col divider between sidebar and pane."""
+def _mid_gutter(out: str, wide: bool = False) -> str:
+    """Visible chars of the divider between sidebar and pane."""
+    gutter_col = 24 if wide else 23
     chars = []
     for ln in out.split("\r\n"):
         v = vis(ln)
-        if v.startswith("│") and len(v) == 79:
-            chars.append(v[23])
+        if not v.startswith("│"):
+            continue
+        if display_width(ln, wide_ambiguous=wide) != 79:
+            continue
+        chars.append(at_display(v, gutter_col, wide_ambiguous=wide))
     return "".join(chars)
 
 
@@ -209,7 +215,7 @@ def test_utf8_gutter_uses_unicode_arrows():
     async def _a():
         s = _session(User(username="dave"), plain=False, sel=0)
         s.codec = "utf-8"
-        mid = _mid_gutter(await render_social(StubConvs(), s))
+        mid = _mid_gutter(await render_social(StubConvs(), s), wide=False)
         assert "→ENTER→" in mid
 
     asyncio.run(_a())
@@ -310,5 +316,76 @@ def test_pane_leaves_rows_for_tab_bar_and_prompt():
         lines = out.split("\r\n")
         assert len(lines) == 22, f"expected 22 pane lines, got {len(lines)}"
         _all_lines_79(lines)
+
+    asyncio.run(_a())
+
+
+def test_utf8_box_bars_stack_on_dash_and_empty_rows():
+    """Frame bars sit on the same columns on dash rows and empty rows."""
+
+    async def _a():
+        c = StubConvs()
+        c.index.append({
+            "id": "newtest-1", "kind": "board", "title": "newtest 1",
+            "created": "2026-08-20T11:00:00+00:00", "requires": [],
+            "participants": [], "message_count": 1,
+            "last_message_at": "2026-08-21T12:00:00+00:00",
+        })
+        c.msgs["newtest-1"] = [
+            {"id": 1, "author": "dave", "body": "hello",
+             "created": "2026-08-21T12:00:00+00:00"},
+        ]
+        s = _session(User(username="dave"), plain=False, sel=1)
+        s.codec = "utf-8"
+        s.terminal_type = "xterm-256color"
+        out = await render_social(c, s)
+        lines = out.split("\r\n")
+        _all_lines_79(lines, wide=False)
+        box = [vis(ln) for ln in lines if vis(ln).startswith("│")]
+        last_topic = next(i for i, v in enumerate(box) if "newtest" in v)
+        empty_after = last_topic + 1
+        sep = next(v for v in box if "─" in v[1:12])
+        for row in (box[0], sep, box[last_topic], box[empty_after]):
+            assert display_width(row, wide_ambiguous=False) == 79
+            assert at_display(row, 0, wide_ambiguous=False) == "│"
+            assert at_display(row, 23, wide_ambiguous=False) in "│→←ENTER"
+            assert at_display(row, 78, wide_ambiguous=False) == "│"
+            sid = vis(row)[1:23]
+            assert len(sid) == 22, sid
+
+    asyncio.run(_a())
+
+
+def test_utf8_two_cell_box_bars_stack_when_probed_wide():
+    """xterm.js-style Ambiguous=2: layout shrinks so │ still stack at 79 display."""
+
+    async def _a():
+        c = StubConvs()
+        c.index.append({
+            "id": "newtest-1", "kind": "board", "title": "newtest 1",
+            "created": "2026-08-20T11:00:00+00:00", "requires": [],
+            "participants": [], "message_count": 1,
+            "last_message_at": "2026-08-21T12:00:00+00:00",
+        })
+        c.msgs["newtest-1"] = [
+            {"id": 1, "author": "dave", "body": "hello",
+             "created": "2026-08-21T12:00:00+00:00"},
+        ]
+        s = _session(User(username="dave"), plain=False, sel=1)
+        s.codec = "utf-8"
+        s.wide_ambiguous = True
+        s.terminal_type = "xterm-256color"
+        out = await render_social(c, s)
+        lines = out.split("\r\n")
+        _all_lines_79(lines, wide=True)
+        box = [vis(ln) for ln in lines if vis(ln).startswith("│")]
+        last_topic = next(i for i, v in enumerate(box) if "newtest" in v)
+        empty_after = last_topic + 1
+        sep = next(v for v in box if "─" in v[1:8])
+        for row in (box[0], sep, box[last_topic], box[empty_after]):
+            assert display_width(row, wide_ambiguous=True) == 79
+            assert at_display(row, 0, wide_ambiguous=True) == "│"
+            assert at_display(row, 24, wide_ambiguous=True) in "│→←ENTER"
+            assert at_display(row, 77, wide_ambiguous=True) == "│"
 
     asyncio.run(_a())

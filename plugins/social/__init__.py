@@ -197,10 +197,10 @@ class SocialPlugin(Plugin):
     async def _social_new_thread(self, session):
         """Compose mode: prompt for a title (capped), then create+select.
 
-        Empty or whitespace-only title silently aborts back to the Social
-        list -- no conversation is created.
+        Empty, whitespace-only, or ESC/control-only title silently aborts
+        back to the Social list -- no conversation is created.
         """
-        from core.conversations import SOCIAL_THREAD_TITLE_MAX
+        from core.conversations import SOCIAL_THREAD_TITLE_MAX, clean_title
 
         while True:
             await self.bbs.send(
@@ -210,7 +210,9 @@ class SocialPlugin(Plugin):
             raw = await runner.read_command(self.bbs, session)
             if raw is None:
                 return
-            title = raw.strip()
+            # ESC here means "cancel", not a one-character title. Storing the
+            # raw byte gave us a board titled ESC that broke its sidebar row.
+            title = clean_title(raw)
             if not title:
                 return
             if len(title) > SOCIAL_THREAD_TITLE_MAX:

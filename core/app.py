@@ -22,40 +22,38 @@ from core.user import UserManager
 from server.session import Session, SessionManager, SessionState
 
 
-def _pad_line(text: str, width: int) -> str:
-    """Pad every CRLF-terminated line to ``width - 1`` visible characters.
+def _pad_line(text: str, width: int, *, wide_ambiguous: bool = False) -> str:
+    """Pad every CRLF-terminated line to ``width - 1`` *display* columns.
 
     Classic BBS discipline: each displayed row must fill the terminal width
     so no character from a previous render bleeds through on a shorter line.
-    ANSI escape sequences are excluded from the width count.  The final
-    fragment (if the text doesn't end with ``\\r\\n``) is left untouched so
-    bare escape commands like ``\\x1b[2J`` aren't polluted with trailing
-    spaces.
+    ANSI is excluded from the width count. The final fragment (no trailing
+    CRLF) is left untouched so ``\\x1b[2J`` isn't padded.
 
-    We pad to *width - 1*, not width: writing the 80th column on Syncterm
-    (and most ANSI terminals) immediately wraps the cursor to the next line,
-    so a padded-to-80 line plus ``\\r\\n`` produces a phantom blank row
-    after every line (the double-spacing bug). Leaving the last column empty
-    still overwrites ghost characters while keeping ``\\r\\n`` clean.
+    Pad to *width - 1*, not width: the 80th column on SyncTERM wraps, and
+    a padded-to-80 line plus ``\\r\\n`` double-spaces the screen.
+
+    Display columns, not codepoints: UTF-8 box drawing can be two cells.
+    Counting ``len()`` then space-padding a 50-glyph dash row back to 79
+    characters made it wrap, which showed up as a short ``│   │`` under
+    the last Social topic. ``\\x1b[K`` clears any leftover on the same row.
     """
     if not text or width <= 0:
         return text
-    from shared.codecs import _ANSI_RE
+    from shared.visible import display_width, fit_display
 
     target = width - 1
     lines = text.split("\r\n")
     padded = []
     for i, line in enumerate(lines):
-        # Only pad lines that were CRLF-terminated (i.e. displayed rows).
-        # The trailing "" after a final CRLF is *not* a row — it's the
-        # cursor position for the next output (e.g. the Login: prompt).
-        # Padding it would glue the next prompt onto the same line and
-        # overflow the width, wrapping its first char to the far right.
         is_row = i < len(lines) - 1
         if is_row:
-            visible = len(_ANSI_RE.sub("", line))
-            if visible < target:
+            visible = display_width(line, wide_ambiguous=wide_ambiguous)
+            if visible > target:
+                line = fit_display(line, target, wide_ambiguous=wide_ambiguous)
+            elif visible < target:
                 line = line + " " * (target - visible)
+            line = line + "\x1b[K"
         padded.append(line)
     return "\r\n".join(padded)
 
@@ -189,7 +187,9 @@ class BBSApp:
         that have no attached server).
         """
         width = getattr(session, "terminal_width", 80)
-        text = _pad_line(text, width)
+        from shared.visible import wide_ambiguous_for
+
+        text = _pad_line(text, width, wide_ambiguous=wide_ambiguous_for(session))
         if self.server is not None and hasattr(self.server, "_send"):
             await self.server._send(session, text)
             return

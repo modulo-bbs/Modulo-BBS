@@ -13,6 +13,7 @@ import re
 
 from core.theme import Palette, load_palette
 from shared.textwrap import wrap
+from shared.visible import display_width, fit_display, hline
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
@@ -30,12 +31,14 @@ def render_bubbles(
     plain: bool = False,
     compact: bool = False,
     palette: Palette | None = None,
+    wide_ambiguous: bool = False,
 ) -> list[str]:
     """Render *msgs* (oldest first) as stacked chat bubbles.
 
     ``new_from_id`` marks the first id considered new since last leave
     (badge on other people's messages only; 0 = none). ``compact`` summarizes:
     author-only title bar, first body line only, no gap rows.
+    ``width`` is display columns (UTF-8 Ambiguous glyphs may be 2).
     """
     if width < 9:
         width = 9
@@ -52,6 +55,12 @@ def render_bubbles(
     C_NEW = "" if plain else pal.warning
     RST = "" if plain else pal.reset
 
+    def _dw(s: str) -> int:
+        return display_width(s, wide_ambiguous=wide_ambiguous)
+
+    def _fit(s: str, n: int) -> str:
+        return fit_display(s, n, wide_ambiguous=wide_ambiguous)
+
     rows: list[str] = []
     for m in msgs:
         author = str(m.get("author", "?"))
@@ -61,19 +70,24 @@ def render_bubbles(
 
         # --- bubble content -------------------------------------------------
         title = author + ("" if compact else f" {_stamp(m.get('created', ''))}") + new_txt
-        body_all = wrap((m.get("body", "") or "").replace("\r", ""), max(4, width - 6))
+        vpad = _dw(V) + 1 + 1 + _dw(V)
+        body_all = wrap((m.get("body", "") or "").replace("\r", ""), max(4, width - vpad))
         if compact and len(body_all) > 1:
             body_all = [body_all[0].rstrip() + ".."]
 
-        bw = min(width, max(len(title) + 6, max((len(l) for l in body_all), default=1) + 4))
-        inner_w = bw - 4
+        title_prefix = f"{TL}{H} "
+        title_min = _dw(title_prefix) + _dw(title) + 1 + _dw(TR)
+        body_min = max((_dw(l) + vpad) for l in body_all) if body_all else vpad
+        bw = min(width, max(title_min, body_min, vpad + 1))
+        inner_w = max(1, bw - vpad)
 
-        fill = max(1, bw - len(title) - 4)
-        plain_rows = [f"{TL}{H} {title}{' ' * fill}{TR}"]
+        pad_title = max(1, bw - _dw(title_prefix) - _dw(title) - _dw(TR))
+        plain_rows = [f"{title_prefix}{title}{' ' * pad_title}{TR}"]
         shown = [body_all[0]] if compact else body_all
         for bl in shown:
-            plain_rows.append(f"{V} {bl[:inner_w]:<{inner_w}} {V}")
-        plain_rows.append(f"{BL}{H * (bw - 2)}{BR}")
+            plain_rows.append(f"{V} {_fit(bl, inner_w)} {V}")
+        plain_rows.append(hline(BL, H, BR, bw, wide_ambiguous=wide_ambiguous))
+        plain_rows = [_fit(pr, bw) for pr in plain_rows]
 
         # --- alignment + color ----------------------------------------------
         pad = (width - bw) if mine else 0
@@ -95,11 +109,14 @@ def render_bubbles(
         if not compact:
             rows.append(" " * width)
 
-    while rows and not _vis(rows[-1]).strip():
+    while rows and not strip_vis(rows[-1]).strip():
         rows.pop()
-    # Normalize: every emitted row is exactly *width* visible columns.
-    return [r + " " * (width - len(_vis(r))) for r in rows]
+    return [_fit(r, width) for r in rows]
+
+
+def strip_vis(s: str) -> str:
+    return _ANSI_RE.sub("", s)
 
 
 def _vis(s: str) -> str:
-    return _ANSI_RE.sub("", s)
+    return strip_vis(s)

@@ -20,14 +20,32 @@ import asyncio
 from dataclasses import dataclass
 
 from core.conversations import SOCIAL_THREAD_TITLE_MAX as TITLE_MAX
+from shared.visible import (
+    fill_display,
+    fit_display,
+    hline,
+    sanitize_cell,
+    wide_ambiguous_for,
+)
 
 DMS_ROOM_ID = "dms"  # sentinel id of the pinned DMs aggregate row
 
-# Two-pane geometry: │(1) + sidebar(22) + │(1) + pane(54) + │(1) = 79 cols.
+# Two-pane geometry: │(1) + sidebar(22) + │(1) + pane(54) + │(1) = 79 cols
+# when every glyph is 1 cell (CP437). UTF-8 Ambiguous box drawing is 2;
+# pane_cell shrinks so the same 79 *display* columns still hold.
+SCREEN_COLS = 79
 SID_CELL = 22
 PANE_CELL = 54
 SID_INNER = SID_CELL - 2   # text width after the padding spaces
 PANE_INNER = PANE_CELL - 2
+
+
+def social_geometry(wide: bool) -> tuple[int, int, int, int]:
+    """sid_cell, pane_cell, sid_inner, pane_inner — all display columns."""
+    bar = 2 if wide else 1
+    sid = SID_CELL
+    pane = SCREEN_COLS - bar - sid - bar - bar
+    return sid, pane, sid - 2, pane - 2
 
 SOCIAL_HINT = "  Enter thread · Up/Dn rooms · N new thread · Space/PgUp/PgDn peek · ESC back"[:79]
 THREAD_HINT = "  Enter post · empty Enter editor · ESC back"[:79]
@@ -237,6 +255,9 @@ async def render_social(
     is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
     pal = palette_for(session)
     username = getattr(user, "username", "") or ""
+    wide = wide_ambiguous_for(session, is_plain)
+    _, _, sid_inner, pane_inner = social_geometry(wide)
+    rule_ch = "-" if is_plain else "─"
 
     rooms = await social_rooms(conversations, user)
     sel = remember_social_selection(session, rooms)
@@ -321,9 +342,10 @@ async def render_social(
         used = 0
         for m in reversed(window):
             grows = _render_bubbles(
-                [m], PANE_INNER, username=username,
+                [m], pane_inner, username=username,
                 new_from_id=new_from, plain=is_plain, compact=compact,
-                palette=None if is_plain else palette_for(session))
+                palette=None if is_plain else palette_for(session),
+                wide_ambiguous=wide)
             if used + len(grows) > pane_rows_n:
                 break
             groups.append(grows)
@@ -343,7 +365,7 @@ async def render_social(
 
     marker = ">" if sel == 0 else " "
     side.append(f"{marker} {'DMs':<15}{dms_unread:>3}")
-    side.append("─" * SID_INNER if not is_plain else "-" * SID_INNER)
+    side.append(fill_display(rule_ch, sid_inner, wide_ambiguous=wide))
     for i, r in enumerate(shown):
         marker = ">" if sel == i + 1 else " "
         star = "*" if r.unread else " "
@@ -355,8 +377,10 @@ async def render_social(
     pane: list[str] = []
     if thread_conv is not None:
         right = f"({len(msgs)} msgs)"
-        pane.append(f"{header_title:<15}{right:>{PANE_INNER - 15}}")
-        pane.append("─" * PANE_INNER if not is_plain else "-" * PANE_INNER)
+        title_w = min(15, pane_inner)
+        rest = max(0, pane_inner - title_w)
+        pane.append(f"{header_title:<{title_w}}{right:>{rest}}")
+        pane.append(fill_display(rule_ch, pane_inner, wide_ambiguous=wide))
         pane.extend(window)
         if not window:
             pane.append("(no messages yet - N posts first)")
@@ -364,18 +388,14 @@ async def render_social(
         pane.append("(select a room)")
 
     # -- zip cells into box rows ----------------------------------------------
-    def cell(text: str, width: int, selected: bool) -> str:
-        # Pad by VISIBLE width -- bubble rows carry ANSI color codes.
-        # The cell's total is width+2 (the flanking spaces are part of it).
-        import re as _re
-
-        body = f" {text} "
-        vlen = len(_re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", body))
-        if vlen > width + 2:
-            plain_text = _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
-            body = f" {plain_text[:width]} "
-            vlen = width + 2
-        padded = body + " " * max(0, width + 2 - vlen)
+    def cell(text: str, inner: int, selected: bool) -> str:
+        # Flanking spaces are part of the cell (inner + 2 = sid_cell / pane_cell).
+        # sanitize first: a bare ESC in stored data (a board titled ESC) makes
+        # the terminal swallow the rest of the row, so the divider and right
+        # border land ~22 columns left of the rest of the frame.
+        text = sanitize_cell(text)
+        fitted = fit_display(text, inner, wide_ambiguous=wide)
+        padded = fit_display(f" {fitted} ", inner + 2, wide_ambiguous=wide)
         if is_plain:
             return padded
         if selected:
@@ -399,20 +419,22 @@ async def render_social(
     left_a, right_a = focus_arrows(session, is_plain)
     stack = gutter_stack(content_rows, compact, left_a, right_a, "│")
     focus = "" if is_plain else pal.accent
+    gutter_cols = 2 if wide else 1
     rows: list[str] = []
     for i in range(content_rows):
         ltxt = side[i] if i < len(side) else ""
         rtxt = pane[i] if i < len(pane) else ""
         gch = stack[i]
+        gpad = fit_display(gch, gutter_cols, wide_ambiguous=wide)
         if gch == "│":
-            gutter = f"{bar}{gch}{rst}"
+            gutter = f"{bar}{gpad}{rst}"
         else:
-            gutter = f"{focus}{gch}{rst}"
+            gutter = f"{focus}{gpad}{rst}"
         rows.append(
             f"{bar}│{rst}"
-            + cell(ltxt, SID_INNER, side_selected(i))
+            + cell(ltxt, sid_inner, side_selected(i))
             + gutter
-            + cell(rtxt, PANE_INNER, False)
+            + cell(rtxt, pane_inner, False)
             + f"{bar}│{rst}"
         )
 
@@ -432,10 +454,15 @@ async def render_social(
     except Exception:
         hint_txt = "up/dn select"
     top = _build_top(labels, active_idx, hint_txt, is_plain, screen_width=79, session=session)
-    bot = "+" + "-" * 77 + "+" if is_plain else f"{pal.muted}└{'─' * 77}┘{pal.reset}"
+    bot = (
+        "+" + "-" * 77 + "+"
+        if is_plain
+        else f"{pal.muted}{hline('└', '─', '┘', SCREEN_COLS, wide_ambiguous=wide)}{pal.reset}"
+    )
     hint_txt = SOCIAL_HINT if hint is None else hint
     if status:
-        hint_txt = f" {status}  {hint_txt.strip()}"[:79]
+        hint_txt = f" {status}  {hint_txt.strip()}"
+    hint_txt = fit_display(hint_txt, SCREEN_COLS, wide_ambiguous=wide)
     hint = hint_txt if is_plain else f"{pal.success}{hint_txt}{pal.reset}"
     lines = [top] + rows + [bot, hint]
     return "\r\n".join(lines)

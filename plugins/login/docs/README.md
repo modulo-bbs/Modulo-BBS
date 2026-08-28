@@ -32,8 +32,8 @@ flow.
 Password and confirm-password prompts echo `*` per keystroke (not the
 real characters). Backspace/DEL edit the hidden buffer — a mistype you
 correct before Enter is the corrected password, not the leftover bytes.
-Telnet briefly `WILL ECHO` for those fields so SyncTERM stops local-echoing
-the secret.
+Telnet `WILL ECHO` on connect so the client drops local echo; password
+fields additionally mask as `*`.
 
 ## Data
 

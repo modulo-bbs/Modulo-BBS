@@ -39,6 +39,27 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def clean_title(title: str) -> str:
+    """Title with control characters removed, whitespace collapsed.
+
+    A title is display data: it lands inside a box-drawn cell. A raw
+    control byte there is not a glyph — the terminal reads it as the start
+    of an escape sequence and eats the rest of the row, so the frame's
+    divider and right border jump left and the row looks like a stray
+    ``|   |`` (live incident 2026-08-28: ``N`` then ESC at the title prompt
+    stored a board titled ESC, which broke that sidebar row on every
+    redraw).
+    """
+    if not title:
+        return ""
+    # Tab/newline are word gaps; ESC and friends are not glyphs at all.
+    kept = [
+        ch if ch.isprintable() else (" " if ch.isspace() else "")
+        for ch in str(title)
+    ]
+    return " ".join("".join(kept).split())
+
+
 class Conversations:
     """Core service mounted as ``bbs.conversations``."""
 
@@ -255,9 +276,9 @@ class Conversations:
     ) -> dict[str, Any]:
         if kind not in CONVERSATION_KINDS:
             raise ValueError(f"kind must be one of {sorted(CONVERSATION_KINDS)}")
-        if not title or not title.strip():
+        title = clean_title(title)
+        if not title:
             raise ValueError("title is required")
-        title = title.strip()
         async with self._index_lock:
             index = await asyncio.to_thread(self._read_index_sync)
             # id: slug from title if not supplied, else supplied

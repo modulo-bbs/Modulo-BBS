@@ -59,6 +59,31 @@ def test_create_requires_title(tmp_path):
     _run(_a())
 
 
+def test_esc_only_title_is_rejected(tmp_path):
+    """N then ESC stored a board titled ESC, which broke its sidebar row."""
+    app = _app(tmp_path)
+
+    async def _a():
+        with pytest.raises(ValueError, match="title is required"):
+            await app.conversations.create_conversation(
+                kind="board", title="\x1b", created_by="dave")
+
+    _run(_a())
+
+
+def test_control_characters_are_stripped_from_titles(tmp_path):
+    app = _app(tmp_path)
+
+    async def _a():
+        conv = await app.conversations.create_conversation(
+            kind="board", title="Gen\x1beral\tDiscussion", created_by="dave")
+        assert "\x1b" not in conv["title"]
+        assert "\t" not in conv["title"]
+        return conv["title"]
+
+    assert _run(_a()) == "General Discussion"
+
+
 def test_invalid_kind_rejected(tmp_path):
     app = _app(tmp_path)
 

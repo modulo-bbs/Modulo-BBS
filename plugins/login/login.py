@@ -120,8 +120,8 @@ class Terminal:
         handled and server-side echo fires; SSH sessions (which echo at
         the transport layer) pass through with echo suppressed there.
         ``secret=True`` echoes asterisks and applies backspace to the
-        hidden buffer (WILL ECHO for the duration so SyncTERM does not
-        local-echo the real password).
+        hidden buffer. Telnet already ``WILL ECHO`` from connect so the
+        client is not local-echoing the real password.
         """
         from core import runner
 
@@ -242,7 +242,9 @@ class LoginFlow:
         #   3. TERMINAL-TYPE name heuristics (ANSI-BBS -> cp437 etc.)
         #   4. default cp437 (never block login on a question; users change
         #      encoding via preferences/web console)
-        from shared.codecs import DEFAULT_CODEC, detect_codec, normalize, probe_utf8
+        from shared.codecs import (
+            DEFAULT_CODEC, detect_codec, normalize, probe_ambiguous_width, probe_utf8,
+        )
 
         saved = (user.preferences or {}).get("encoding")
         if saved:
@@ -254,6 +256,23 @@ class LoginFlow:
             else:
                 heuristic = detect_codec(getattr(session, "terminal_type", None))
                 session.codec = heuristic or DEFAULT_CODEC
+
+        session.wide_ambiguous = False
+        if session.codec == "utf-8":
+            # Only a terminal that *answers* col 3 gets the two-cell layout.
+            # Assuming wide on silence clipped rows on ordinary terminals,
+            # where glibc wcwidth reports one cell for box drawing.
+            probed_wide = await probe_ambiguous_width(self.bbs, session)
+            session.wide_ambiguous = bool(probed_wide)
+            logger.info(
+                "session codec=%s wide_ambiguous=%s (probe=%s) ttype=%s %sx%s",
+                session.codec,
+                session.wide_ambiguous,
+                probed_wide,
+                getattr(session, "terminal_type", ""),
+                getattr(session, "terminal_width", 80),
+                getattr(session, "terminal_height", 24),
+            )
 
         try:
             await self.bbs.users.update(

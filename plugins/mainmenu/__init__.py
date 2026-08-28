@@ -28,6 +28,15 @@ from shared.telnet_protocol import ANSI
 from core import modal as core_modal
 from core import runner
 from core.theme import palette_for
+from shared.visible import (
+    center_display,
+    display_width,
+    fill_display,
+    fit_display,
+    hline,
+    overlay_display,
+    wide_ambiguous_for,
+)
 
 
 def _collapse_overlay_spacing(text: str) -> str:
@@ -140,19 +149,22 @@ def _hint_for_session(session) -> str:
     return " \x18\x19\x1B\x1A/WASD select "
 
 
-def _flow_cells(labels, hint, active_idx):
-    """Flow-tab layout math (Dave's algorithm, pure len()).
+def _flow_cells(labels, hint, active_idx, wide=False):
+    """Flow-tab layout math in display columns.
 
-    Each tab renders as a ``| <label> | `` cell (len(label)+5 visible cols);
-    the ACTIVE cell's label is centered to max(len(label), len(hint)) so the
+    Each tab renders as a ``| <label> | `` cell (label+5 visible cols);
+    the ACTIVE cell's label is centered to max(label, hint) so the
     funnel hint fits its stop. Returns (label widths, active_x, slot_w) where
     active_x is the exact visible column of the active cell's opening '|'.
     """
+    def w(s: str) -> int:
+        return display_width(s, wide_ambiguous=wide)
+
     if not labels:
-        return [], 0, max(len(hint), 1)
-    widths = [max(len(lab), len(hint)) if i == active_idx else len(lab)
+        return [], 0, max(w(hint), 1)
+    widths = [max(w(lab), w(hint)) if i == active_idx else w(lab)
               for i, lab in enumerate(labels)]
-    active_x = 5 * active_idx + sum(len(lab) for lab in labels[:active_idx])
+    active_x = 5 * active_idx + sum(w(lab) for lab in labels[:active_idx])
     return widths, active_x, widths[active_idx]
 
 
@@ -160,27 +172,31 @@ def _build_top(labels, active_idx, hint, is_plain, screen_width=79, session=None
     """Rule under the tab row, with the hint sitting in the active tab's
     inner slot. No extra bars or corners — those read as stray glyphs.
     """
-    _w, x, slot = _flow_cells(labels, hint, active_idx)
+    wide = wide_ambiguous_for(session, is_plain)
+    _w, x, slot = _flow_cells(labels, hint, active_idx, wide=wide)
     fill = "-" if is_plain else "─"
-    inner = hint.center(slot)
+    inner = center_display(hint, slot, wide_ambiguous=wide)
     start = x + 2  # skip the tab cell's "| "
-    row = fill * screen_width
-    if 0 <= start <= screen_width:
-        end = min(screen_width, start + len(inner))
-        row = row[:start] + inner[: end - start] + row[end:]
-    row = row[:screen_width]
+    row = fill_display(fill, screen_width, wide_ambiguous=wide)
+    row = overlay_display(row, start, inner, screen_width, wide_ambiguous=wide)
     if is_plain:
         return row
     p = palette_for(session)
-    a, b = max(0, start), min(screen_width, start + len(inner))
+    # Colour the hint by finding it in the already-overlaid string.
+    a = row.find(inner)
+    b = a + len(inner) if a >= 0 else 0
+    if a < 0:
+        return f"{p.muted}{row}{p.reset}"
     return (f"{p.muted}{row[:a]}{p.reset}"
             f"{p.text}{row[a:b]}{p.reset}"
             f"{p.muted}{row[b:]}{p.reset}")
 
 
-def _list_row(disp: str, selected: bool, is_plain: bool, pal) -> str:
+def _list_row(disp: str, selected: bool, is_plain: bool, pal, *, wide: bool = False) -> str:
     """One PIM list row: phosphor text, selection uses tab colours (not REVERSE)."""
-    inner = disp[:74].ljust(74)
+    bar_w = 2 if wide else 1
+    inner_w = 79 - bar_w - 2 - 1 - bar_w  # │ + mark + inner + space + │
+    inner = fit_display(disp, inner_w, wide_ambiguous=wide)
     if is_plain:
         mark = "> " if selected else "  "
         return f"│{mark}{inner} │"
@@ -195,6 +211,7 @@ def list_pane(bbs, session, items: list[str], hint: str) -> str:
     """Funnel + selectable list + bottom + hint. Tab bar is drawn by mainmenu."""
     is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
     pal = palette_for(session)
+    wide = wide_ambiguous_for(session, is_plain)
     tabs = visible_tabs(load_tabs(bbs), getattr(session, "user", None))
     labels = [x["label"] for x in tabs]
     aid = getattr(session, "_pim_active_tab", None) or (tabs[0]["id"] if tabs else "")
@@ -203,7 +220,7 @@ def list_pane(bbs, session, items: list[str], hint: str) -> str:
         labels, active_idx, _hint_for_session(session), is_plain,
         screen_width=79, session=session,
     )
-    bot = "+" + "-" * 77 + "+" if is_plain else f"{pal.muted}└{'─' * 77}┘{pal.reset}"
+    bot = "+" + "-" * 77 + "+" if is_plain else f"{pal.muted}{hline('└', '─', '┘', 79, wide_ambiguous=wide)}{pal.reset}"
     selected = int(getattr(session, "_pim_selected", 0) or 0)
     if selected < 0:
         selected = 0
@@ -215,10 +232,10 @@ def list_pane(bbs, session, items: list[str], hint: str) -> str:
             pass
     lines = [top]
     if not items:
-        lines.append(_list_row("(nothing here)".ljust(74), False, is_plain, pal))
+        lines.append(_list_row("(nothing here)", False, is_plain, pal, wide=wide))
     else:
         for idx, text in enumerate(items):
-            lines.append(_list_row(str(text)[:74].ljust(74), idx == selected, is_plain, pal))
+            lines.append(_list_row(str(text), idx == selected, is_plain, pal, wide=wide))
     lines.append(bot)
     lines.append(hint if is_plain else f"{pal.success}{hint}{pal.reset}")
     return "\r\n".join(lines)
@@ -386,11 +403,12 @@ class MainmenuPlugin(Plugin):
             return " " * 79
         active_idx = max(0, next((i for i, x in enumerate(tabs) if x["id"] == active_id), 0))
         hint = _hint_for_session(session)
-        widths, _x, _s = _flow_cells(labels, hint, active_idx)
+        wide = wide_ambiguous_for(session, is_plain)
+        widths, _x, _s = _flow_cells(labels, hint, active_idx, wide=wide)
         parts = []
         for i, tb in enumerate(tabs):
             lab = tb["label"]
-            cell = lab.center(widths[i]) if i == active_idx else lab
+            cell = center_display(lab, widths[i], wide_ambiguous=wide) if i == active_idx else lab
             if is_plain:
                 parts.append(cell.upper() if i == active_idx else cell)
             elif i == active_idx:

@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 import asyncio
-import re
 
-from shared.codecs import PROBE_CHAR, PROBE_CLEAR, probe_utf8
+from shared.codecs import PROBE_BOX, PROBE_CHAR, PROBE_CLEAR, probe_ambiguous_width, probe_utf8
 
 
 class FakeWriter:
@@ -96,3 +95,30 @@ def test_reply_split_across_chunks():
         return await probe_utf8(FakeBBS(), s, timeout=2)
 
     assert run(scenario()) == "utf-8"
+
+
+def test_box_drawing_one_cell():
+    async def scenario():
+        s = make_session([b"\x1b[1;2R"])
+        result = await probe_ambiguous_width(FakeBBS(), s, timeout=2)
+        sent = bytes(s.writer.buffer)
+        assert PROBE_BOX.encode("utf-8") in sent
+        return result
+
+    assert run(scenario()) is False
+
+
+def test_box_drawing_two_cells():
+    async def scenario():
+        s = make_session([b"\x1b[1;3R"])
+        return await probe_ambiguous_width(FakeBBS(), s, timeout=2)
+
+    assert run(scenario()) is True
+
+
+def test_box_drawing_silent_dsr_returns_none():
+    async def scenario():
+        s = make_session([])
+        return await probe_ambiguous_width(FakeBBS(), s, timeout=0.3)
+
+    assert run(scenario()) is None
