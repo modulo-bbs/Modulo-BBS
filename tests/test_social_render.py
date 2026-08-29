@@ -272,6 +272,27 @@ def test_ansi_variant_highlights_selected_row():
     asyncio.run(_a())
 
 
+def test_focused_pane_box_uses_active_colour():
+    """Browse lights the left walls; thread focus lights the right walls."""
+    from core.theme import load_palette
+
+    async def _a():
+        pal = load_palette("classic")
+        s = _session(User(username="dave"), plain=False, sel=0)
+        browse = await render_social(StubConvs(), s)
+        row = next(ln for ln in browse.split("\r\n") if "DMs" in strip_ansi(ln))
+        assert row.startswith(pal.active + "│")
+        assert row.rstrip().endswith(pal.reset) or pal.inactive + "│" in row
+        # right outer bar is inactive while rooms have the keys
+        assert pal.inactive + "│" in row
+        thread = await render_social(StubConvs(), s, compact=False)
+        trow = next(ln for ln in thread.split("\r\n") if "DMs" in strip_ansi(ln))
+        assert trow.startswith(pal.inactive + "│")
+        assert pal.active + "│" in trow
+
+    asyncio.run(_a())
+
+
 def test_scroll_window_over_long_threads():
     async def _a():
         c = StubConvs()

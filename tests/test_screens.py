@@ -210,7 +210,8 @@ class TestSend:
 
 
 _THEME_ROLES = (
-    "ACCENT", "SUCCESS", "WARNING", "ERROR", "MUTED", "FRAME", "TEXT", "TAB_FG", "TAB_BG",
+    "ACCENT", "SUCCESS", "WARNING", "ERROR", "MUTED", "FRAME", "INACTIVE",
+    "ACTIVE", "TEXT", "TAB_FG", "TAB_BG",
 )
 
 

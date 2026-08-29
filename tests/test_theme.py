@@ -47,6 +47,8 @@ def test_classic_matches_shipped_file():
     assert p.error == ANSI.BRIGHT_RED
     assert p.muted == ANSI.BRIGHT_BLACK
     assert p.frame == ANSI.BRIGHT_BLACK
+    assert p.inactive == ANSI.BRIGHT_BLACK
+    assert p.active == ANSI.BRIGHT_CYAN
     assert p.text == ANSI.BRIGHT_WHITE
     assert p.prompt == ANSI.BRIGHT_GREEN
     assert p.tab_fg == ANSI.BRIGHT_WHITE
@@ -65,7 +67,8 @@ def test_shipped_presets_are_complete_and_distinct():
         assert pal.name == name
         toks = pal.tokens()
         for role in ("ACCENT", "SUCCESS", "WARNING", "ERROR", "MUTED",
-                     "FRAME", "TEXT", "PROMPT", "TAB_FG", "TAB_BG", "HIGHLIGHT"):
+                     "FRAME", "INACTIVE", "ACTIVE", "TEXT", "PROMPT",
+                     "TAB_FG", "TAB_BG", "HIGHLIGHT"):
             assert toks[role], role
             assert toks[role].startswith("\033[")
 
@@ -75,7 +78,8 @@ def test_crt_monos_stay_in_one_phosphor():
     a = {ANSI.YELLOW, ANSI.BRIGHT_YELLOW, ANSI.BG_YELLOW, ANSI.BLACK}
     for pal, allowed in ((load_palette("matrix"), g), (load_palette("honey"), a)):
         for role in ("accent", "success", "warning", "error", "muted",
-                     "frame", "text", "prompt", "tab_fg", "tab_bg"):
+                     "frame", "inactive", "active", "text", "prompt",
+                     "tab_fg", "tab_bg"):
             assert getattr(pal, role) in allowed, (pal.name, role)
             assert getattr(pal, role) != ANSI.DIM
 
@@ -132,6 +136,23 @@ def test_frame_is_independent_of_muted(tmp_path):
         set_themes_dir(None)
 
 
+def test_active_and_inactive_are_independent(tmp_path):
+    """Focused vs idle region chrome are separate keys."""
+    set_themes_dir(tmp_path)
+    try:
+        (tmp_path / "split.theme").write_text(
+            "active=11\ninactive=8\n", encoding="utf-8"
+        )
+        pal = load_palette("split")
+        assert pal.active == ANSI.BRIGHT_CYAN
+        assert pal.inactive == ANSI.BRIGHT_BLACK
+        assert pal.tokens()["ACTIVE"] == ANSI.BRIGHT_CYAN
+        assert pal.tokens()["INACTIVE"] == ANSI.BRIGHT_BLACK
+        assert "active" not in pal.extras
+    finally:
+        set_themes_dir(None)
+
+
 def test_partial_file_fills_classic_defaults(tmp_path):
     set_themes_dir(tmp_path)
     try:
@@ -146,6 +167,8 @@ def test_partial_file_fills_classic_defaults(tmp_path):
         assert pal.accent == ANSI.BRIGHT_CYAN
         assert pal.error == ANSI.BRIGHT_RED
         assert pal.frame == ANSI.BRIGHT_BLACK  # missing key → classic
+        assert pal.inactive == ANSI.BRIGHT_BLACK
+        assert pal.active == ANSI.BRIGHT_CYAN  # missing → accent
         assert "ice" in theme_names()
     finally:
         set_themes_dir(None)

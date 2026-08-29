@@ -5,7 +5,9 @@ Boards and DMs as a two-pane Social surface. Listed in
 
 ENTER on a room focuses that thread — same two-pane screen, left column
 stays. The middle divider points at the column you can move into:
-`>` ENTER from rooms, `<` ESC from the thread (UTF-8 `→` `←`).
+`>` ENTER from rooms, `<` ESC from the thread (UTF-8 `→` `←`). The
+focused pane's box uses the theme's `active=` colour; the idle pane uses
+`inactive=`.
 Bubbles are **me vs everyone else**:
 your messages sit **right / accent**, everyone else **left / success**.
 Sidebar `*` is unread until you open the thread. `*NEW*` is other people's

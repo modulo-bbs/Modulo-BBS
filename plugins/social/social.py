@@ -416,6 +416,14 @@ async def render_social(
 
     bar = "" if is_plain else pal.frame
     rst = "" if is_plain else pal.reset
+    left_on = compact  # browse: rooms have the keys; thread focus: the right pane
+    if is_plain:
+        left_bar = right_bar = mid_bar = ""
+    else:
+        on, off = pal.active, pal.inactive
+        left_bar = on if left_on else off
+        right_bar = on if not left_on else off
+        mid_bar = on  # shared wall belongs to the focused pane
     left_a, right_a = focus_arrows(session, is_plain)
     stack = gutter_stack(content_rows, compact, left_a, right_a, "│")
     focus = "" if is_plain else pal.accent
@@ -427,15 +435,15 @@ async def render_social(
         gch = stack[i]
         gpad = fit_display(gch, gutter_cols, wide_ambiguous=wide)
         if gch == "│":
-            gutter = f"{bar}{gpad}{rst}"
+            gutter = f"{mid_bar}{gpad}{rst}"
         else:
             gutter = f"{focus}{gpad}{rst}"
         rows.append(
-            f"{bar}│{rst}"
+            f"{left_bar}│{rst}"
             + cell(ltxt, sid_inner, side_selected(i))
             + gutter
             + cell(rtxt, pane_inner, False)
-            + f"{bar}│{rst}"
+            + f"{right_bar}│{rst}"
         )
 
     # -- chrome -----------------------------------------------------------------

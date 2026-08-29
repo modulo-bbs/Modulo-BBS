@@ -63,6 +63,8 @@ these roles so they recolor after login:
 | `{ERROR}` | failures |
 | `{MUTED}` | inactive tab labels, dim text |
 | `{FRAME}` | box drawing: tab bars, pane borders, rules |
+| `{INACTIVE}` | unfocused region chrome (idle pane) |
+| `{ACTIVE}` | focused region chrome (the pane that has the keys) |
 | `{TEXT}` | emphasized body |
 | `{PROMPT}` | the `>` prompt |
 | `{TAB_FG}` `{TAB_BG}` `{HIGHLIGHT}` | active PIM tab / list selection |

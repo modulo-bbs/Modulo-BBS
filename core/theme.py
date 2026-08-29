@@ -51,6 +51,8 @@ _CLASSIC_NUMS: dict[str, tuple[int, int | None]] = {
     "error": (12, None),       # bright red
     "muted": (8, None),        # dark gray (DOS stand-in for dim)
     "frame": (8, None),        # box drawing: tab bars, pane borders, rules
+    "inactive": (8, None),    # unfocused region chrome (idle pane)
+    "active": (11, None),     # focused region chrome (classic cyan)
     "text": (15, None),        # bright white
     "prompt": (10, None),      # same as success — the `>` line
     "highlight": (15, 1),      # bright white on blue
@@ -72,6 +74,8 @@ class Palette:
     error: str       # failures
     muted: str       # inactive tab labels, dim text
     frame: str       # box drawing: tab bars, pane borders, rules
+    inactive: str    # unfocused region chrome (idle pane, idle widget)
+    active: str      # focused region chrome (the pane that has the keys)
     text: str        # emphasized body
     prompt: str      # the `>` prompt
     tab_fg: str      # active PIM tab / list selection foreground
@@ -88,6 +92,8 @@ class Palette:
             "ERROR": self.error,
             "MUTED": self.muted,
             "FRAME": self.frame,
+            "INACTIVE": self.inactive,
+            "ACTIVE": self.active,
             "TEXT": self.text,
             "PROMPT": self.prompt,
             "TAB_FG": self.tab_fg,
@@ -229,6 +235,8 @@ def _palette_from_elements(name: str, elements: dict[str, str]) -> Palette:
         error=base["error"],
         muted=base["muted"],
         frame=base.get("frame") or base["muted"],
+        inactive=base.get("inactive") or base.get("frame") or base["muted"],
+        active=base.get("active") or base["accent"],
         text=base["text"],
         prompt=base.get("prompt") or base["success"],
         tab_fg=tab_fg,
