@@ -118,7 +118,7 @@ Resolution per name: `.ans` (CP437+ANSI) → `.asc` (plain ASCII) →
 
 Tokens (`{username}`, `{time}`, `{node}`, `{active}`, `{ACCENT}`,
 `{BRIGHT_CYAN}` …) work in any screen. Semantic `{ACCENT}` / `{SUCCESS}` /
-`{WARNING}` / `{ERROR}` / `{MUTED}` / `{TEXT}` follow the caller's
+`{WARNING}` / `{ERROR}` / `{MUTED}` / `{FRAME}` / `{TEXT}` follow the caller's
 `/theme` (saved as `preferences.theme`). Literal colour names stay that
 colour. `.ans` files with painted SGR bytes are **not** recolored — they
 are art, not templates. Full vocabulary: **`docs/screens.md`**. Theme
@@ -140,9 +140,10 @@ in `core/version.py`.
 Palettes live in **`themes/*.theme`** — one `key=fg` or `key=fg,bg` per
 line, DOS colour numbers (0–15). Missing keys use classic defaults. Drop
 `themes/sunset.theme` and it shows up in `/theme`; edit the file and the
-next paint picks it up. No Python, no restart. How-to and colour chart:
-**`docs/themes.md`**. Pre-login stays classic. `.ans` art does not follow
-the palette.
+next paint picks it up. No Python, no restart. `frame=` colours the box
+lines (tab bars, pane borders); `muted=` is inactive tab labels. How-to
+and colour chart: **`docs/themes.md`**. Pre-login stays classic. `.ans`
+art does not follow the palette.
 
 ### Loading
 

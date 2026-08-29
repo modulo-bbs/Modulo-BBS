@@ -261,8 +261,8 @@ await self.bbs.send(session, f"\033[2J\033[1;1H")
 ```
 
 Selected rows use `p.tab_fg` + `p.tab_bg`, not `ANSI.REVERSE` (REVERSE
-is a silver bar on SyncTERM and fights CRT palettes). Always pair a
-colour with `p.reset`.
+is a silver bar on SyncTERM and fights CRT palettes). Box drawing uses
+`p.frame`. Always pair a colour with `p.reset`.
 
 ### Menu Display
 

@@ -6,6 +6,7 @@ success=6
 warning=14
 error=6
 muted=6
+frame=6
 text=14
 prompt=6
 highlight=0,6

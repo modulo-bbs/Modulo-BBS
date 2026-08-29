@@ -76,7 +76,8 @@ on brown (amber selection).
 | `success` | ok, footer hints, other people's bubbles | `{SUCCESS}` |
 | `warning` | `*NEW*`, caution | `{WARNING}` |
 | `error` | failures | `{ERROR}` |
-| `muted` | inactive tabs, gutters | `{MUTED}` |
+| `muted` | inactive tab labels, dim text | `{MUTED}` |
+| `frame` | box drawing: tab bars, pane borders, rules | `{FRAME}` |
 | `text` | list body, unselected rows | `{TEXT}` |
 | `prompt` | the `>` prompt | `{PROMPT}` |
 | `highlight` | **active tab and list selection** (`fg,bg`) | `{HIGHLIGHT}` `{TAB_FG}` `{TAB_BG}` |
@@ -163,9 +164,9 @@ await self.bbs.send(session, f"{p.prompt}  >{p.reset}")
 banner = p.extras.get("banner", p.accent)
 ```
 
-Selected rows: `p.tab_fg` + `p.tab_bg` (from `highlight=`). Always pair
-a colour with `p.reset`. Do not branch on the theme *name* inside a
-plugin — ask for roles.
+Selected rows: `p.tab_fg` + `p.tab_bg` (from `highlight=`). Box drawing
+(`│` `─` `└┘`) uses `p.frame`. Always pair a colour with `p.reset`. Do
+not branch on the theme *name* inside a plugin — ask for roles.
 
 The loader lives in `core/theme.py`. Tests: `tests/test_theme.py`.
 The directory is `themes/` at the board root (overridable in tests via

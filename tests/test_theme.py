@@ -46,6 +46,7 @@ def test_classic_matches_shipped_file():
     assert p.warning == ANSI.BRIGHT_YELLOW
     assert p.error == ANSI.BRIGHT_RED
     assert p.muted == ANSI.BRIGHT_BLACK
+    assert p.frame == ANSI.BRIGHT_BLACK
     assert p.text == ANSI.BRIGHT_WHITE
     assert p.prompt == ANSI.BRIGHT_GREEN
     assert p.tab_fg == ANSI.BRIGHT_WHITE
@@ -64,7 +65,7 @@ def test_shipped_presets_are_complete_and_distinct():
         assert pal.name == name
         toks = pal.tokens()
         for role in ("ACCENT", "SUCCESS", "WARNING", "ERROR", "MUTED",
-                     "TEXT", "PROMPT", "TAB_FG", "TAB_BG", "HIGHLIGHT"):
+                     "FRAME", "TEXT", "PROMPT", "TAB_FG", "TAB_BG", "HIGHLIGHT"):
             assert toks[role], role
             assert toks[role].startswith("\033[")
 
@@ -74,7 +75,7 @@ def test_crt_monos_stay_in_one_phosphor():
     a = {ANSI.YELLOW, ANSI.BRIGHT_YELLOW, ANSI.BG_YELLOW, ANSI.BLACK}
     for pal, allowed in ((load_palette("matrix"), g), (load_palette("honey"), a)):
         for role in ("accent", "success", "warning", "error", "muted",
-                     "text", "prompt", "tab_fg", "tab_bg"):
+                     "frame", "text", "prompt", "tab_fg", "tab_bg"):
             assert getattr(pal, role) in allowed, (pal.name, role)
             assert getattr(pal, role) != ANSI.DIM
 
@@ -115,6 +116,22 @@ def test_parse_skips_comments_and_bad_lines():
     assert elems["_tab_bg"] == ANSI.BG_WHITE
 
 
+def test_frame_is_independent_of_muted(tmp_path):
+    """Sysops can colour box lines without changing inactive tab labels."""
+    set_themes_dir(tmp_path)
+    try:
+        (tmp_path / "split.theme").write_text(
+            "muted=8\nframe=11\n", encoding="utf-8"
+        )
+        pal = load_palette("split")
+        assert pal.muted == ANSI.BRIGHT_BLACK
+        assert pal.frame == ANSI.BRIGHT_CYAN
+        assert pal.tokens()["FRAME"] == ANSI.BRIGHT_CYAN
+        assert "frame" not in pal.extras
+    finally:
+        set_themes_dir(None)
+
+
 def test_partial_file_fills_classic_defaults(tmp_path):
     set_themes_dir(tmp_path)
     try:
@@ -128,6 +145,7 @@ def test_partial_file_fills_classic_defaults(tmp_path):
         assert pal.prompt == ANSI.WHITE + ANSI.BG_BLACK
         assert pal.accent == ANSI.BRIGHT_CYAN
         assert pal.error == ANSI.BRIGHT_RED
+        assert pal.frame == ANSI.BRIGHT_BLACK  # missing key → classic
         assert "ice" in theme_names()
     finally:
         set_themes_dir(None)

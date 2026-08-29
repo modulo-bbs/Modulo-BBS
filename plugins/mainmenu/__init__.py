@@ -197,10 +197,10 @@ def _build_top(labels, active_idx, hint, is_plain, screen_width=79, session=None
     a = row.find(inner)
     b = a + len(inner) if a >= 0 else 0
     if a < 0:
-        return f"{p.muted}{row}{p.reset}"
-    return (f"{p.muted}{row[:a]}{p.reset}"
+        return f"{p.frame}{row}{p.reset}"
+    return (f"{p.frame}{row[:a]}{p.reset}"
             f"{p.text}{row[a:b]}{p.reset}"
-            f"{p.muted}{row[b:]}{p.reset}")
+            f"{p.frame}{row[b:]}{p.reset}")
 
 
 def _list_row(disp: str, selected: bool, is_plain: bool, pal, *, wide: bool = False) -> str:
@@ -211,7 +211,7 @@ def _list_row(disp: str, selected: bool, is_plain: bool, pal, *, wide: bool = Fa
     if is_plain:
         mark = "> " if selected else "  "
         return f"│{mark}{inner} │"
-    bar = pal.muted
+    bar = pal.frame
     rst = pal.reset
     if selected:
         return f"{bar}│{rst}{pal.tab_fg}{pal.tab_bg} {inner} {rst}{bar}│{rst}"
@@ -231,7 +231,7 @@ def list_pane(bbs, session, items: list[str], hint: str) -> str:
         labels, active_idx, _hint_for_session(session), is_plain,
         screen_width=79, session=session,
     )
-    bot = "+" + "-" * 77 + "+" if is_plain else f"{pal.muted}{hline('└', '─', '┘', 79, wide_ambiguous=wide)}{pal.reset}"
+    bot = "+" + "-" * 77 + "+" if is_plain else f"{pal.frame}{hline('└', '─', '┘', 79, wide_ambiguous=wide)}{pal.reset}"
     selected = int(getattr(session, "_pim_selected", 0) or 0)
     if selected < 0:
         selected = 0
@@ -427,7 +427,8 @@ class MainmenuPlugin(Plugin):
                 parts.append(f"{p.tab_fg}{p.tab_bg}{cell}{p.reset}")
             else:
                 parts.append(f"{p.muted}{cell}{p.reset}")
-        row = sep + "".join(f" {c} {sep}" for c in parts)
+        bar = sep if is_plain else f"{p.frame}{sep}{p.reset}"
+        row = bar + "".join(f" {c} {bar}" for c in parts)
         pad = max(0, 79 - display_width(row, wide_ambiguous=wide))
         return row + " " * pad
 

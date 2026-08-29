@@ -217,7 +217,19 @@ def test_classic_fallback_when_home_mode_menu(tmp_path):
     assert "up/dn select" not in text
 
 
-def test_amber_theme_recolors_active_tab(tmp_path):
+def test_tab_bars_use_frame_role(tmp_path):
+    """Tab-strip │ follows frame=, not the terminal default."""
+    from core.theme import palette_for
+
+    app = _app(tmp_path)
+    user = User(username="dave", groups=[], preferences={"theme": "amber"})
+    s = _session(user)
+    p = app.get_plugin("mainmenu")
+    asyncio.run(p._show_menu(s))
+    pal = palette_for(s)
+    raw_tab = next(l for l in s.writer.text().splitlines() if "Dashboard" in l)
+    assert pal.frame in raw_tab
+    assert "│" in raw_tab
     from shared.telnet_protocol import ANSI
 
     app = _app(tmp_path)

@@ -414,7 +414,7 @@ async def render_social(
         board_idx = row_idx - 2  # row 1 is the separator
         return board_idx >= 0 and sel == board_idx + 1
 
-    bar = "" if is_plain else pal.muted
+    bar = "" if is_plain else pal.frame
     rst = "" if is_plain else pal.reset
     left_a, right_a = focus_arrows(session, is_plain)
     stack = gutter_stack(content_rows, compact, left_a, right_a, "│")
@@ -457,7 +457,7 @@ async def render_social(
     bot = (
         "+" + "-" * 77 + "+"
         if is_plain
-        else f"{pal.muted}{hline('└', '─', '┘', SCREEN_COLS, wide_ambiguous=wide)}{pal.reset}"
+        else f"{pal.frame}{hline('└', '─', '┘', SCREEN_COLS, wide_ambiguous=wide)}{pal.reset}"
     )
     hint_txt = SOCIAL_HINT if hint is None else hint
     if status:

@@ -12,6 +12,7 @@ success=10
 warning=14
 error=12
 muted=8
+frame=8
 text=15
 prompt=10
 highlight=15,1

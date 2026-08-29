@@ -50,6 +50,7 @@ _CLASSIC_NUMS: dict[str, tuple[int, int | None]] = {
     "warning": (14, None),     # bright yellow
     "error": (12, None),       # bright red
     "muted": (8, None),        # dark gray (DOS stand-in for dim)
+    "frame": (8, None),        # box drawing: tab bars, pane borders, rules
     "text": (15, None),        # bright white
     "prompt": (10, None),      # same as success — the `>` line
     "highlight": (15, 1),      # bright white on blue
@@ -69,7 +70,8 @@ class Palette:
     success: str     # ok / hints / other-bubbles
     warning: str     # NEW / caution
     error: str       # failures
-    muted: str       # inactive chrome, gutters
+    muted: str       # inactive tab labels, dim text
+    frame: str       # box drawing: tab bars, pane borders, rules
     text: str        # emphasized body
     prompt: str      # the `>` prompt
     tab_fg: str      # active PIM tab / list selection foreground
@@ -85,6 +87,7 @@ class Palette:
             "WARNING": self.warning,
             "ERROR": self.error,
             "MUTED": self.muted,
+            "FRAME": self.frame,
             "TEXT": self.text,
             "PROMPT": self.prompt,
             "TAB_FG": self.tab_fg,
@@ -225,6 +228,7 @@ def _palette_from_elements(name: str, elements: dict[str, str]) -> Palette:
         warning=base["warning"],
         error=base["error"],
         muted=base["muted"],
+        frame=base.get("frame") or base["muted"],
         text=base["text"],
         prompt=base.get("prompt") or base["success"],
         tab_fg=tab_fg,

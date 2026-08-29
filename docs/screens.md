@@ -61,7 +61,8 @@ these roles so they recolor after login:
 | `{SUCCESS}` | ok / hints / other-bubbles |
 | `{WARNING}` | NEW / caution |
 | `{ERROR}` | failures |
-| `{MUTED}` | inactive chrome |
+| `{MUTED}` | inactive tab labels, dim text |
+| `{FRAME}` | box drawing: tab bars, pane borders, rules |
 | `{TEXT}` | emphasized body |
 | `{PROMPT}` | the `>` prompt |
 | `{TAB_FG}` `{TAB_BG}` `{HIGHLIGHT}` | active PIM tab / list selection |
