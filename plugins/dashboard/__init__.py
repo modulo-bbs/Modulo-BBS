@@ -59,7 +59,7 @@ class DashboardPlugin(Plugin):
             self.bbs,
             session,
             items,
-            "  Arrows/WASD or 1/2/3 to switch tabs, Enter to open, Q to disconnect",
+            "  Arrows · WASD or 1/2/3 to switch tabs, Enter to open, Q to disconnect",
         )
 
     async def handle_home_key(self, session, key: str) -> bool:

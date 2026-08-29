@@ -135,6 +135,12 @@ def _strip_ansi(s: str) -> str:
     return re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', s)
 
 
+def _tab_sep(is_plain: bool) -> str:
+    """Tab cell bars. ASCII pipe on dumb terminals; box ``│`` everywhere else
+    so the strip matches the pane frame under it."""
+    return "|" if is_plain else "│"
+
+
 def _hint_for_session(session) -> str:
     """Hint under the active tab: arrows+WASD when the codec can show them."""
     is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
@@ -142,29 +148,33 @@ def _hint_for_session(session) -> str:
         return " WASD select "
     codec = getattr(session, "codec", None) or "cp437"
     if codec == "utf-8":
-        return " ↑↓←→/WASD select "
+        return " ↑↓←→ · WASD select "
     if codec == "ascii":
         return " WASD select "
     # CP437 arrows 0x18-0x1B; shown as glyphs in SyncTERM ANSI-BBS mode.
-    return " \x18\x19\x1B\x1A/WASD select "
+    return " \x18\x19\x1B\x1A · WASD select "
 
 
-def _flow_cells(labels, hint, active_idx, wide=False):
+def _flow_cells(labels, hint, active_idx, wide=False, sep="|"):
     """Flow-tab layout math in display columns.
 
-    Each tab renders as a ``| <label> | `` cell (label+5 visible cols);
-    the ACTIVE cell's label is centered to max(label, hint) so the
-    funnel hint fits its stop. Returns (label widths, active_x, slot_w) where
-    active_x is the exact visible column of the active cell's opening '|'.
+    Shared bars: ``{sep} label {sep} label {sep}``. Doubling them ate a
+    column per tab on an 80-col ANSI screen. The ACTIVE cell is centered
+    to max(label, hint) so the funnel hint fits its stop.
+    Returns (label widths, active_x, slot_w) where active_x is the
+    display column of the active cell's opening separator.
     """
     def w(s: str) -> int:
         return display_width(s, wide_ambiguous=wide)
 
+    sep_w = w(sep) or 1
+    # each preceding tab: space + label + space + sep
+    chrome = 2 + sep_w
     if not labels:
         return [], 0, max(w(hint), 1)
     widths = [max(w(lab), w(hint)) if i == active_idx else w(lab)
               for i, lab in enumerate(labels)]
-    active_x = 5 * active_idx + sum(w(lab) for lab in labels[:active_idx])
+    active_x = chrome * active_idx + sum(w(lab) for lab in labels[:active_idx])
     return widths, active_x, widths[active_idx]
 
 
@@ -173,10 +183,11 @@ def _build_top(labels, active_idx, hint, is_plain, screen_width=79, session=None
     inner slot. No extra bars or corners — those read as stray glyphs.
     """
     wide = wide_ambiguous_for(session, is_plain)
-    _w, x, slot = _flow_cells(labels, hint, active_idx, wide=wide)
+    sep = _tab_sep(is_plain)
+    _w, x, slot = _flow_cells(labels, hint, active_idx, wide=wide, sep=sep)
     fill = "-" if is_plain else "─"
     inner = center_display(hint, slot, wide_ambiguous=wide)
-    start = x + 2  # skip the tab cell's "| "
+    start = x + display_width(sep, wide_ambiguous=wide) + 1  # skip "{sep} "
     row = fill_display(fill, screen_width, wide_ambiguous=wide)
     row = overlay_display(row, start, inner, screen_width, wide_ambiguous=wide)
     if is_plain:
@@ -394,8 +405,8 @@ class MainmenuPlugin(Plugin):
         return ("post", "editor", "discard")[idx]
 
     def _render_tabs(self, session, tabs: list[dict], active_id: str) -> str:
-        """Tab row as '| label | ' cells (same _flow_cells math as the funnel
-        row, so alignment holds by construction, not by coordinates)."""
+        """Tab row as ``{sep} label {sep} label {sep}`` (same _flow_cells
+        math as the funnel, so the hint lines up with the active cell)."""
         is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
         p = palette_for(session)
         labels = [x["label"] for x in tabs]
@@ -404,7 +415,8 @@ class MainmenuPlugin(Plugin):
         active_idx = max(0, next((i for i, x in enumerate(tabs) if x["id"] == active_id), 0))
         hint = _hint_for_session(session)
         wide = wide_ambiguous_for(session, is_plain)
-        widths, _x, _s = _flow_cells(labels, hint, active_idx, wide=wide)
+        sep = _tab_sep(is_plain)
+        widths, _x, _s = _flow_cells(labels, hint, active_idx, wide=wide, sep=sep)
         parts = []
         for i, tb in enumerate(tabs):
             lab = tb["label"]
@@ -415,9 +427,9 @@ class MainmenuPlugin(Plugin):
                 parts.append(f"{p.tab_fg}{p.tab_bg}{cell}{p.reset}")
             else:
                 parts.append(f"{p.muted}{cell}{p.reset}")
-        row = "".join(f"| {c} | " for c in parts)
-        vis = 5 * len(parts) + sum(widths)
-        return row + " " * max(0, 79 - vis)
+        row = sep + "".join(f" {c} {sep}" for c in parts)
+        pad = max(0, 79 - display_width(row, wide_ambiguous=wide))
+        return row + " " * pad
 
     async def _render_pane(self, session, tab: dict) -> str:
         """Delegate the middle pane to the plugin named by this tab."""

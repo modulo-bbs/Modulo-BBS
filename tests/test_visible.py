@@ -35,7 +35,7 @@ def test_esc_title_cannot_shift_the_frame():
 
 def test_strip_ansi_keeps_cp437_arrows_drops_csi():
     assert strip_ansi("a\x1b[33mbc") == "abc"
-    arrows = " \x18\x19\x1B\x1A/WASD select "
+    arrows = " \x18\x19\x1B\x1A · WASD select "
     assert strip_ansi(arrows) == arrows
     assert display_width(arrows, wide_ambiguous=False) == len(arrows)
 
@@ -50,7 +50,7 @@ def test_fill_and_hline_utf8_are_79_display():
 
 def test_overlay_hint_keeps_79():
     base = fill_display("─", 79, wide_ambiguous=True)
-    hint = center_display(" ↑↓←→/WASD select ", 22, wide_ambiguous=True)
+    hint = center_display(" ↑↓←→ · WASD select ", 22, wide_ambiguous=True)
     row = overlay_display(base, 16, hint, 79, wide_ambiguous=True)
     assert display_width(row, wide_ambiguous=True) == 79
     assert "select" in row

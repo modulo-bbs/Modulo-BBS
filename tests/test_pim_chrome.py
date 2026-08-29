@@ -89,13 +89,15 @@ def test_pim_shows_tabs_and_pane(tmp_path):
     def _vis(line: str) -> str:
         return _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line)
     tab_line = _vis(next(l for l in text.splitlines() if "Dashboard" in l))
-    pipes = [i for i, ch in enumerate(tab_line) if ch == "|"]
+    pipes = [i for i, ch in enumerate(tab_line) if ch == "│"]
     assert pipes, "tab bar has no delimiters"
+    assert "|" not in tab_line
+    assert "│ │" not in tab_line  # shared bars, not a doubled cell wall
     top_line = next(l for l in text.splitlines() if "select" in l)
     stripped = _vis(top_line)
     inner = stripped[pipes[0] + 2 : pipes[1] - 1]
     assert "select" in inner.lower()
-    assert "\\" not in stripped and "┐" not in stripped
+    assert "\\" not in stripped and "┐" not in stripped and "/" not in stripped
     # pane content includes the seeded message preview
     assert "hello world" in text or "General" in text or "dave" in text
     # prompt is pinned at bottom (contains >)
@@ -187,16 +189,19 @@ def test_utf8_social_hint_sits_under_tab_without_corners(tmp_path):
     lines = [vis(ln) for ln in raw.split("\r\n") if vis(ln).strip()]
     tab = next(ln for ln in lines if "Social" in ln and "Dashboard" in ln)
     funnel = next(ln for ln in lines if "select" in ln)
-    assert tab.startswith("|"), tab
+    assert tab.startswith("│"), tab
     assert funnel.startswith("─"), funnel
     assert "↑" in funnel
     assert "\\" not in funnel and "┐" not in funnel and "|" not in funnel
-    pipes = [i for i, ch in enumerate(tab) if ch == "|"]
-    # Social is tab 1: pipes[2] open, pipes[3] close — tab row is ASCII so
-    # codepoint == display. Funnel dashes are Ambiguous; slice by display col.
+    assert "/" not in funnel
+    pipes = [i for i, ch in enumerate(tab) if ch == "│"]
+    # Shared bars: Social (tab 1) sits between pipes[1] and pipes[2].
+    # Tab row is 1-cell │ here; funnel dashes are Ambiguous — slice by
+    # display column so the hint still lines up with the tab cell.
     from shared.visible import slice_display
 
-    inner = slice_display(funnel, pipes[2] + 2, pipes[3] - 1, wide_ambiguous=False)
+    assert "│ │" not in tab
+    inner = slice_display(funnel, pipes[1] + 2, pipes[2] - 1, wide_ambiguous=False)
     assert "select" in inner
 
 
