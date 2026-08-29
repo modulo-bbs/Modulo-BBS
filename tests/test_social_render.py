@@ -203,21 +203,27 @@ def test_gutter_stack_points_at_the_column_you_can_enter():
     assert gutter_stack(3, True, "<", ">", "|") == [">", "E", "N"]
 
 
-def test_focus_arrows_follow_codec():
+def test_focus_arrows_plain_vs_high_ascii():
     s = _session(User(username="dave"))
     assert focus_arrows(s, True) == ("<", ">")
     s.codec = "utf-8"
-    assert focus_arrows(s, False) == ("←", "→")
+    assert focus_arrows(s, False) == ("«", "»")
     s.codec = "cp437"
-    assert focus_arrows(s, False) == ("<", ">")
+    assert focus_arrows(s, False) == ("«", "»")
+    assert "«".encode("cp437") == b"\xae"
+    assert "»".encode("cp437") == b"\xaf"
+    assert "┴".encode("cp437") == b"\xc1"
 
 
-def test_utf8_gutter_uses_unicode_arrows():
+def test_ansi_gutter_uses_high_ascii_chevrons():
     async def _a():
         s = _session(User(username="dave"), plain=False, sel=0)
-        s.codec = "utf-8"
         mid = _mid_gutter(await render_social(StubConvs(), s), wide=False)
-        assert "→ENTER→" in mid
+        assert "»ENTER»" in mid
+        thread = _mid_gutter(
+            await render_social(StubConvs(), s, compact=False), wide=False
+        )
+        assert "«ESC«" in thread
 
     asyncio.run(_a())
 
@@ -289,6 +295,38 @@ def test_focused_pane_box_uses_active_colour():
         trow = next(ln for ln in thread.split("\r\n") if "DMs" in strip_ansi(ln))
         assert trow.startswith(pal.inactive + "│")
         assert pal.active + "│" in trow
+
+    asyncio.run(_a())
+
+
+def test_bottom_tee_joins_floor_and_follows_pane_focus():
+    """Floor is split at CP437 193 (┴); each half follows active/inactive."""
+    from core.theme import load_palette
+
+    async def _a():
+        pal = load_palette("classic")
+        s = _session(User(username="dave"), plain=False, sel=0)
+        browse = await render_social(StubConvs(), s)
+        bot = next(ln for ln in browse.split("\r\n") if vis(ln).startswith("└"))
+        v = vis(bot)
+        assert display_width(bot, wide_ambiguous=False) == 79
+        assert at_display(v, 0) == "└"
+        assert at_display(v, 23) == "┴"
+        assert at_display(v, 78) == "┘"
+        assert bot.startswith(pal.active + "└")
+        assert pal.active + "┴" in bot
+        assert pal.inactive in bot
+        thread = await render_social(StubConvs(), s, compact=False)
+        tbot = next(ln for ln in thread.split("\r\n") if vis(ln).startswith("└"))
+        assert at_display(vis(tbot), 23) == "┴"
+        assert tbot.startswith(pal.inactive + "└")
+        assert pal.active + "┴" in tbot
+        # ENTER/ESC stack is text= (white), not accent, so amber stays readable
+        mid_row = next(
+            ln for ln in thread.split("\r\n")
+            if vis(ln).startswith("│") and at_display(vis(ln), 23) == "E"
+        )
+        assert pal.text in mid_row
 
     asyncio.run(_a())
 
@@ -370,7 +408,7 @@ def test_utf8_box_bars_stack_on_dash_and_empty_rows():
         for row in (box[0], sep, box[last_topic], box[empty_after]):
             assert display_width(row, wide_ambiguous=False) == 79
             assert at_display(row, 0, wide_ambiguous=False) == "│"
-            assert at_display(row, 23, wide_ambiguous=False) in "│→←ENTER"
+            assert at_display(row, 23, wide_ambiguous=False) in "│»«ENTERESC"
             assert at_display(row, 78, wide_ambiguous=False) == "│"
             sid = vis(row)[1:23]
             assert len(sid) == 22, sid
@@ -407,7 +445,7 @@ def test_utf8_two_cell_box_bars_stack_when_probed_wide():
         for row in (box[0], sep, box[last_topic], box[empty_after]):
             assert display_width(row, wide_ambiguous=True) == 79
             assert at_display(row, 0, wide_ambiguous=True) == "│"
-            assert at_display(row, 24, wide_ambiguous=True) in "│→←ENTER"
+            assert at_display(row, 24, wide_ambiguous=True) in "│»«ENTERESC"
             assert at_display(row, 77, wide_ambiguous=True) == "│"
 
     asyncio.run(_a())

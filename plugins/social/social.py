@@ -23,7 +23,6 @@ from core.conversations import SOCIAL_THREAD_TITLE_MAX as TITLE_MAX
 from shared.visible import (
     fill_display,
     fit_display,
-    hline,
     sanitize_cell,
     wide_ambiguous_for,
 )
@@ -54,15 +53,14 @@ THREAD_HINT = "  Enter post · empty Enter editor · ESC back"[:79]
 def focus_arrows(session, is_plain: bool) -> tuple[str, str]:
     """Left/right pointer for the Social divider, per session codec.
 
-    ASCII and CP437 use ``<`` / ``>`` (IBM C0 arrows are 0x1A/0x1B and
-    collide with ESC when mixed with colour). UTF-8 gets ``←`` / ``→``.
+    Plain terminals get ASCII ``<`` / ``>``. Everyone else gets CP437
+    High ASCII ``«`` / ``»`` (bytes 0xAE / 0xAF). IBM triangles 0x10/0x11
+    are C0 (same class as the tab-strip arrows); 0x11 is also XON, and
+    Python's cp437 codec cannot round-trip U+25BA anyway.
     """
     if is_plain:
         return "<", ">"
-    codec = getattr(session, "codec", None) or "cp437"
-    if codec == "utf-8":
-        return "←", "→"
-    return "<", ">"
+    return "«", "»"
 
 
 def gutter_stack(
@@ -256,7 +254,7 @@ async def render_social(
     pal = palette_for(session)
     username = getattr(user, "username", "") or ""
     wide = wide_ambiguous_for(session, is_plain)
-    _, _, sid_inner, pane_inner = social_geometry(wide)
+    sid_cell, pane_cell, sid_inner, pane_inner = social_geometry(wide)
     rule_ch = "-" if is_plain else "─"
 
     rooms = await social_rooms(conversations, user)
@@ -414,19 +412,18 @@ async def render_social(
         board_idx = row_idx - 2  # row 1 is the separator
         return board_idx >= 0 and sel == board_idx + 1
 
-    bar = "" if is_plain else pal.frame
     rst = "" if is_plain else pal.reset
     left_on = compact  # browse: rooms have the keys; thread focus: the right pane
     if is_plain:
-        left_bar = right_bar = mid_bar = ""
+        left_bar = right_bar = mid_bar = label = ""
     else:
         on, off = pal.active, pal.inactive
         left_bar = on if left_on else off
         right_bar = on if not left_on else off
         mid_bar = on  # shared wall belongs to the focused pane
+        label = pal.text  # ENTER/ESC + pointers: contrast against the frame
     left_a, right_a = focus_arrows(session, is_plain)
     stack = gutter_stack(content_rows, compact, left_a, right_a, "│")
-    focus = "" if is_plain else pal.accent
     gutter_cols = 2 if wide else 1
     rows: list[str] = []
     for i in range(content_rows):
@@ -437,7 +434,7 @@ async def render_social(
         if gch == "│":
             gutter = f"{mid_bar}{gpad}{rst}"
         else:
-            gutter = f"{focus}{gpad}{rst}"
+            gutter = f"{label}{gpad}{rst}"
         rows.append(
             f"{left_bar}│{rst}"
             + cell(ltxt, sid_inner, side_selected(i))
@@ -462,11 +459,16 @@ async def render_social(
     except Exception:
         hint_txt = "up/dn select"
     top = _build_top(labels, active_idx, hint_txt, is_plain, screen_width=79, session=session)
-    bot = (
-        "+" + "-" * 77 + "+"
-        if is_plain
-        else f"{pal.frame}{hline('└', '─', '┘', SCREEN_COLS, wide_ambiguous=wide)}{pal.reset}"
-    )
+    if is_plain:
+        bot = "+" + "-" * sid_cell + "+" + "-" * pane_cell + "+"
+    else:
+        left_floor = "└" + fill_display("─", sid_cell, wide_ambiguous=wide)
+        right_floor = fill_display("─", pane_cell, wide_ambiguous=wide) + "┘"
+        bot = (
+            f"{left_bar}{left_floor}{rst}"
+            f"{mid_bar}┴{rst}"
+            f"{right_bar}{right_floor}{rst}"
+        )
     hint_txt = SOCIAL_HINT if hint is None else hint
     if status:
         hint_txt = f" {status}  {hint_txt.strip()}"

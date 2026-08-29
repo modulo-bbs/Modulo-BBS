@@ -151,7 +151,8 @@ def _hint_for_session(session) -> str:
         return " ↑↓←→ · WASD select "
     if codec == "ascii":
         return " WASD select "
-    # CP437 arrows 0x18-0x1B; shown as glyphs in SyncTERM ANSI-BBS mode.
+    # IBM C0 0x18–0x1B (↑↓←→ in a CP437 font). Not ASCII, not High ASCII
+    # 128–255. 0x1B is also ESC; fine here because no SGR follows the byte.
     return " \x18\x19\x1B\x1A · WASD select "
 
 
