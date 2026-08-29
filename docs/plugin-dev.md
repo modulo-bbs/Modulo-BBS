@@ -48,9 +48,10 @@ whenever you need to `await` something like `bbs.send()`.
 ### 3. Drop It In
 
 The loader discovers every package under `plugins/` that exports a `Plugin`
-subclass — there is no enable list to edit. Create the directory, and the
-plugin appears in the main menu after a restart. Remove the directory (or
-the subclass) to disable it.
+subclass. Create the directory, add the plugin's `name` to
+`plugins/mainmenu/data/home` if you want it on the tab strip (one name per
+line; that file is the list), and restart. Remove the directory (or the
+subclass) to disable it.
 
 ### 4. Restart the Server
 

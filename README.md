@@ -17,10 +17,11 @@ The other bet is that almost everything you see is a plugin. Login, the
 menu, Social, files, bulletins — each one is a folder. The core is supposed
 to stay small: sessions, users, the event bus, getting bytes to the
 terminal. If you want a feature, you write a plugin (or you ask an agent
-to, with this tree and `docs/plugin-dev.md` in front of it) and drop the
-directory in. No enable list. Restart, and it is there. We want that to be
-easy enough that a human can do it on a weekend, and an agent can do it
-without inventing a second way to configure the board.
+to, with this tree and `docs/plugin-dev.md` in front of it), drop the
+directory in, and put its name on a line in `plugins/mainmenu/data/home`
+if it belongs on the tab strip. That file is the list. Restart, and it is
+there. We want that to be easy enough that a human can do it on a weekend,
+and an agent can do it without inventing a second way to configure the board.
 
 It is early, and we know it. First connect should still feel like a working
 board, not a project you assemble. If it doesn't, that is on us.
