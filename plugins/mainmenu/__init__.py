@@ -292,24 +292,40 @@ class MainmenuPlugin(Plugin):
 
         import time
 
+        from core import live
+
         last_key_at = time.monotonic()
         while session.is_active:
-            await self._show_menu(session)
             # Single keypress, no Enter -- menu keys are one character.
             # PIM navigation is handled here; classic keys fall through to
-            # _handle(). PIM idles with a 1s poll so Social (and other
-            # panes) pick up new mail without switching tabs.
-            if self._is_pim(session):
-                key = await runner.read_key(
-                    self.bbs, session,
-                    timeout=1.0, idle_on_timeout=False,
-                )
-            else:
-                key = await runner.read_key(self.bbs, session)
+            # _handle(). Social idles until a key or a live post (push),
+            # not a 1s poll-and-clear. Arm before paint so a post during
+            # the draw still wakes the following wait.
+            watching = (
+                self._is_pim(session)
+                and self._active_tab_id(session) == "social"
+            )
+            if watching:
+                live.arm(self.bbs, session)
+            try:
+                await self._show_menu(session)
+                if watching:
+                    rem = runner.IDLE_TIMEOUT - (time.monotonic() - last_key_at)
+                    if rem <= 0:
+                        break
+                    key = await runner.read_key_or_wake(
+                        self.bbs, session,
+                        timeout=rem, idle_on_timeout=True,
+                    )
+                    if key == live.WAKE:
+                        continue
+                else:
+                    key = await runner.read_key(self.bbs, session)
+            finally:
+                if watching:
+                    live.disarm(self.bbs, session)
             if key is None:
-                if time.monotonic() - last_key_at > runner.IDLE_TIMEOUT:
-                    break
-                continue
+                break
             last_key_at = time.monotonic()
             if key == "/":
                 # The `>` is a hotkey prompt, not a shell. `/` switches that

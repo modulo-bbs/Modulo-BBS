@@ -292,8 +292,8 @@ async def read_key(
     follow-up byte within :data:`ESC_KEY_WINDOW` returns ``"ESC"`` (B0:
     Social's back key); a fast-following byte still parses as its sequence.
     BACKSPACE (DEL/BS) is ``"BACKSPACE"``. Chat mode reads with
-    ``preserve_case=True`` and ``idle_on_timeout=False`` (short polling
-    without tripping the idle-notice).
+    ``preserve_case=True`` and ``idle_on_timeout=False`` so a live-mail
+    wake does not trip the idle-notice.
     Bytes typed after the key are stashed in ``_line_buffer`` for the next
     read. Does not echo (see module docstring).
     """
@@ -406,6 +406,60 @@ async def read_key(
                 session._line_buffer = buf[i + 1 :]
                 return ch if preserve_case else ch.upper()
         # Pure control / whitespace: loop for a real key.
+
+
+async def read_key_or_wake(
+    bbs,
+    session,
+    timeout: float = IDLE_TIMEOUT,
+    *,
+    preserve_case: bool = False,
+    idle_on_timeout: bool = True,
+) -> str | None:
+    """Like :func:`read_key`, but return :data:`core.live.WAKE` if live mail arrives.
+
+    Cancelling the socket read leaves unread bytes in the StreamReader
+    buffer for the next call. A real key wins over a simultaneous wake.
+    """
+    from core.live import WAKE
+
+    wake = getattr(session, "_live_wake", None)
+    if wake is None:
+        return await read_key(
+            bbs, session, timeout=timeout,
+            preserve_case=preserve_case, idle_on_timeout=idle_on_timeout,
+        )
+
+    key_task = asyncio.create_task(
+        read_key(
+            bbs, session, timeout=timeout,
+            preserve_case=preserve_case, idle_on_timeout=idle_on_timeout,
+        )
+    )
+    wake_task = asyncio.create_task(wake.wait())
+    done, pending = await asyncio.wait(
+        {key_task, wake_task}, return_when=asyncio.FIRST_COMPLETED,
+    )
+    for t in pending:
+        t.cancel()
+    for t in pending:
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
+    key = None
+    got_key = False
+    if key_task in done and not key_task.cancelled():
+        try:
+            key = key_task.result()
+            got_key = True
+        except (asyncio.CancelledError, asyncio.InvalidStateError):
+            pass
+    if got_key and key is not None:
+        return key
+    if wake.is_set():
+        return WAKE
+    return key
 
 
 async def run_plugin_flow(bbs, plugin, session) -> bool:

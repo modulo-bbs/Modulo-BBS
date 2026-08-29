@@ -230,9 +230,9 @@ def test_slash_theme_picker_enter_applies(tmp_path):
     asyncio.run(_a())
 
 
-def test_pim_idle_poll_refreshes_social_preview(tmp_path):
-    """Sitting on a highlighted room sees new mail without switching tabs."""
-    from core import runner
+def test_pim_live_push_refreshes_social_preview(tmp_path):
+    """A post from another node wakes Social; idle does not poll-and-clear."""
+    from core import live, runner
 
     app = _app(tmp_path)
     dave = User(username="dave", groups=[])
@@ -248,7 +248,7 @@ def test_pim_idle_poll_refreshes_social_preview(tmp_path):
         await app.conversations.post_message(
             "b1", author="ana", body="hello room")
         n = 0
-        orig = runner.read_key
+        orig = runner.read_key_or_wake
 
         async def fake_rk(bbs, sess, timeout=runner.IDLE_TIMEOUT, **kw):
             nonlocal n
@@ -256,14 +256,14 @@ def test_pim_idle_poll_refreshes_social_preview(tmp_path):
             if n == 1:
                 await app.conversations.post_message(
                     "b1", author="api_test", body="while you looked")
-                return None
+                return live.WAKE
             return "Q"
 
-        runner.read_key = fake_rk  # type: ignore[assignment]
+        runner.read_key_or_wake = fake_rk  # type: ignore[assignment]
         try:
             await p.on_session_start(s)
         finally:
-            runner.read_key = orig  # type: ignore[assignment]
+            runner.read_key_or_wake = orig  # type: ignore[assignment]
 
     asyncio.run(_a())
     text = bytes(s.writer.buf).decode("cp437", errors="replace")

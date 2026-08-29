@@ -77,6 +77,18 @@ class Conversations:
         self._index_lock = asyncio.Lock()
         self._reads_lock = asyncio.Lock()
 
+    def _fanout(self, event: str, data: dict[str, Any]) -> None:
+        """Tell the bus and wake idle Social waiters (no 1s poll)."""
+        bbs = self.bbs
+        if bbs is None:
+            return
+        events = getattr(bbs, "events", None)
+        if events is not None:
+            events.emit(event, data)
+        from core.live import wake
+
+        wake(bbs)
+
     def _root(self) -> Path:
         return self.bbs.storage.dir(self._storage_name)
 
@@ -312,7 +324,8 @@ class Conversations:
             await asyncio.to_thread(self._write_index_sync, index)
             # create dir eagerly so messages.jsonl exists
             await asyncio.to_thread(lambda: self._conv_dir(cid).mkdir(parents=True, exist_ok=True))
-            return conv
+        self._fanout("conversations:create", {"conversation": conv, "by": created_by})
+        return conv
 
     async def list_messages(self, conv_id: str) -> list[dict[str, Any]]:
         conv = await self.get_conversation(conv_id)
@@ -357,7 +370,11 @@ class Conversations:
                         c["last_message_at"] = msg["created"]
                         break
                 await asyncio.to_thread(self._write_index_sync, index)
-            return msg
+        self._fanout(
+            "conversations:post",
+            {"conversation_id": conv_id, "msg": msg},
+        )
+        return msg
 
     async def delete_message(self, conv_id: str, msg_id: int, *, by_user) -> bool:
         """Delete own message, or any message if user is moderator/sysop.
@@ -449,6 +466,10 @@ class Conversations:
                 if changed:
                     await asyncio.to_thread(self._write_reads_sync, data)
         self._locks.pop(conv_id, None)
+        self._fanout(
+            "conversations:delete_conversation",
+            {"conversation_id": conv_id, "by": getattr(by_user, "username", "")},
+        )
         return True
 
     async def find_messages(

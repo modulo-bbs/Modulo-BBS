@@ -302,12 +302,13 @@ class SocialPlugin(Plugin):
         through the transition. Leaving the notepad with a draft (and Enter
         on a one-line draft) always opens Post / Editor / Discard. ESC on
         the picker keeps the draft on the prompt; ESC on the prompt returns
-        to browsing rooms. UP/DOWN scroll history (tail-anchored). Idle
-        polls once a second so mail that arrived since last leave shows
-        as *NEW*.
+        to browsing rooms. UP/DOWN scroll history (tail-anchored). A live
+        post from another node wakes this wait so *NEW* shows without a
+        1s poll-and-clear.
         """
         import time
 
+        from core import live
         from plugins.social.social import THREAD_HINT, new_badge_from_id, render_social
         from shared.textwrap import wrap as _tw_wrap
 
@@ -417,64 +418,72 @@ class SocialPlugin(Plugin):
                     last_fp = None
 
             while getattr(session, "is_active", True):
+                live.arm(self.bbs, session)
                 try:
-                    msgs = await self.bbs.conversations.list_messages(cid)
-                except Exception:
-                    msgs = []
-                fp = (len(msgs), max((int(m.get("id", 0)) for m in msgs), default=0), len(rows))
-                dirty = fp != last_fp
-                last_fp = fp
+                    try:
+                        msgs = await self.bbs.conversations.list_messages(cid)
+                    except Exception:
+                        msgs = []
+                    fp = (len(msgs), max((int(m.get("id", 0)) for m in msgs), default=0), len(rows))
+                    dirty = fp != last_fp
+                    last_fp = fp
 
-                if dirty:
-                    new_count = (
-                        sum(
-                            1 for m in msgs
-                            if int(m.get("id", 0)) >= new_from
-                            and str(m.get("author", "")) != uname
+                    if dirty:
+                        new_count = (
+                            sum(
+                                1 for m in msgs
+                                if int(m.get("id", 0)) >= new_from
+                                and str(m.get("author", "")) != uname
+                            )
+                            if new_from else 0
                         )
-                        if new_from else 0
-                    )
-                    status_parts = []
-                    if scroll_back:
-                        status_parts.append(
-                            f"history: {scroll_back} newer hidden - DOWN/PgDn")
-                    if new_count:
-                        status_parts.append(f"{new_count} NEW")
-                    status = "  ".join(status_parts)
-                    session._pim_active_tab = "social"  # type: ignore[attr-defined]
-                    await self._select_thread_room(session, conv)
-                    pane = await render_social(
-                        self.bbs.conversations, session,
-                        compact=False,
-                        new_from_id=new_from,
-                        scroll_up=scroll_back,
-                        hint=THREAD_HINT,
-                        status=status,
-                    )
-                    tab = self._social_tab_bar(session)
-                    frame = [tab] + pane.split("\r\n")
-                    while len(frame) < h - len(rows):
-                        frame.append(" " * w)
-                    frame = frame[: h - len(rows)]
-                    frame.extend(rows)
-                    await self.bbs.send(
-                        session,
-                        "\x1b[2J\x1b[H" + "\x1b[K\r\n".join(frame[:h]),
-                    )
+                        status_parts = []
+                        if scroll_back:
+                            status_parts.append(
+                                f"history: {scroll_back} newer hidden - DOWN/PgDn")
+                        if new_count:
+                            status_parts.append(f"{new_count} NEW")
+                        status = "  ".join(status_parts)
+                        session._pim_active_tab = "social"  # type: ignore[attr-defined]
+                        await self._select_thread_room(session, conv)
+                        pane = await render_social(
+                            self.bbs.conversations, session,
+                            compact=False,
+                            new_from_id=new_from,
+                            scroll_up=scroll_back,
+                            hint=THREAD_HINT,
+                            status=status,
+                        )
+                        tab = self._social_tab_bar(session)
+                        frame = [tab] + pane.split("\r\n")
+                        while len(frame) < h - len(rows):
+                            frame.append(" " * w)
+                        frame = frame[: h - len(rows)]
+                        frame.extend(rows)
+                        await self.bbs.send(
+                            session,
+                            "\x1b[2J\x1b[H" + "\x1b[K\r\n".join(frame[:h]),
+                        )
 
-                if pending_offer:
-                    pending_offer = False
-                    await offer_draft()
-                    continue
+                    if pending_offer:
+                        pending_offer = False
+                        await offer_draft()
+                        continue
 
-                key = await runner.read_key(
-                    self.bbs, session,
-                    timeout=1.0, preserve_case=True, idle_on_timeout=False,
-                )
-                if key is None:
-                    if time.monotonic() - last_key_at > runner.IDLE_TIMEOUT:
+                    rem = runner.IDLE_TIMEOUT - (time.monotonic() - last_key_at)
+                    if rem <= 0:
                         break
-                    continue
+                    key = await runner.read_key_or_wake(
+                        self.bbs, session,
+                        timeout=rem, preserve_case=True, idle_on_timeout=False,
+                    )
+                    if key == live.WAKE:
+                        last_fp = None
+                        continue
+                    if key is None:
+                        break
+                finally:
+                    live.disarm(self.bbs, session)
                 last_key_at = time.monotonic()
 
                 async def redraw_input() -> None:
@@ -592,13 +601,14 @@ class SocialPlugin(Plugin):
         last_key_at = time.monotonic()
         await self.bbs.send(session, render(text, off))
         while getattr(session, "is_active", True):
+            rem = runner.IDLE_TIMEOUT - (time.monotonic() - last_key_at)
+            if rem <= 0:
+                return False, text
             key = await runner.read_key(
-                self.bbs, session, timeout=1.0,
+                self.bbs, session, timeout=rem,
                 preserve_case=True, idle_on_timeout=False)
             if key is None:
-                if time.monotonic() - last_key_at > runner.IDLE_TIMEOUT:
-                    return False, text  # idle: back to chat, draft kept
-                continue
+                return False, text  # idle: back to chat, draft kept
             last_key_at = time.monotonic()
             rows = wrap_rows(text, inner_w)
 
