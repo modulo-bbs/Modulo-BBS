@@ -18,6 +18,8 @@ people's posts show up without switching tabs. Compose: one-line prompt; Enter w
 Post / Editor / Discard (the modal plugin). Empty Enter / wrap / LF opens
 the overlay notepad; leaving it with a draft reopens that modal. ESC on
 the picker keeps the draft; ESC on the prompt returns to browsing rooms.
-`N` new thread (title ≤15).
+`N` new thread (title ≤15). `D` deletes the highlighted board after a
+confirm: sysops can remove any thread; the author can remove theirs only
+while nobody else has posted. The DMs row cannot be deleted.
 
 SyncTERM: Enter is CR (trailing LF swallowed); Ctrl-Enter is LF.

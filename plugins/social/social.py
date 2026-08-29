@@ -47,7 +47,7 @@ def social_geometry(wide: bool) -> tuple[int, int, int, int]:
     pane = SCREEN_COLS - bar - sid - bar - bar
     return sid, pane, sid - 2, pane - 2
 
-SOCIAL_HINT = "  Enter thread · Up/Dn rooms · N new thread · Space/PgUp/PgDn peek · ESC back"[:79]
+SOCIAL_HINT = "  Enter thread · Up/Dn · N new thread · D delete · Space/PgUp peek · ESC"[:79]
 THREAD_HINT = "  Enter post · empty Enter editor · ESC back"[:79]
 
 

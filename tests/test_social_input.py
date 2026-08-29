@@ -244,9 +244,8 @@ def test_n_whitespace_title_silently_aborts(tmp_path):
     asyncio.run(_a())
 
 
-def test_r_and_d_retired_from_social_fall_through(tmp_path):
-    """B8: R/D compose keys are gone — messaging lives in chat mode
-    (Enter). Unhandled keys fall through to the generic PIM layer."""
+def test_r_retired_from_social_falls_through(tmp_path):
+    """B8: R compose is gone — messaging lives in chat mode (Enter)."""
     app = _app(tmp_path)
     _seed(app)
     dave = User(username="dave", groups=[])
@@ -255,7 +254,135 @@ def test_r_and_d_retired_from_social_fall_through(tmp_path):
 
     async def _a():
         assert await p._handle_pim_key(s, "R") is False
-        assert await p._handle_pim_key(s, "D") is False
+
+    asyncio.run(_a())
+
+
+def test_d_deletes_own_empty_thread_after_confirm(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _social_session(dave)
+    p = app.get_plugin("mainmenu")
+
+    async def _a():
+        await app.conversations.create_conversation(
+            kind="board", title="Mine", created_by="dave", conv_id="mine")
+        s._social_selected_id = "mine"
+        keys = iter(["UP", "ENTER"])  # highlight Delete, confirm
+        orig = runner.read_key
+
+        async def fake_rk(bbs, session, timeout=runner.IDLE_TIMEOUT, **kw):
+            return next(keys)
+
+        runner.read_key = fake_rk  # type: ignore[assignment]
+        try:
+            assert await p._handle_pim_key(s, "D") is True
+        finally:
+            runner.read_key = orig  # type: ignore[assignment]
+        assert await app.conversations.get_conversation("mine") is None
+
+    asyncio.run(_a())
+
+
+def test_d_cancel_keeps_thread(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _social_session(dave)
+    p = app.get_plugin("mainmenu")
+
+    async def _a():
+        await app.conversations.create_conversation(
+            kind="board", title="Keep", created_by="dave", conv_id="keep")
+        s._social_selected_id = "keep"
+        orig = runner.read_key
+
+        async def fake_rk(bbs, session, timeout=runner.IDLE_TIMEOUT, **kw):
+            return "ESC"
+
+        runner.read_key = fake_rk  # type: ignore[assignment]
+        try:
+            assert await p._handle_pim_key(s, "D") is True
+        finally:
+            runner.read_key = orig  # type: ignore[assignment]
+        assert await app.conversations.get_conversation("keep") is not None
+
+    asyncio.run(_a())
+
+
+def test_d_refuses_thread_with_replies(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=[])
+    s = _social_session(dave)
+    p = app.get_plugin("mainmenu")
+
+    async def _a():
+        # b1 was seeded with ana's post
+        s._social_selected_id = "b1"
+        orig = runner.read_key
+
+        async def fake_rk(bbs, session, timeout=runner.IDLE_TIMEOUT, **kw):
+            return "ENTER"  # dismiss notice
+
+        runner.read_key = fake_rk  # type: ignore[assignment]
+        try:
+            assert await p._handle_pim_key(s, "D") is True
+        finally:
+            runner.read_key = orig  # type: ignore[assignment]
+        assert await app.conversations.get_conversation("b1") is not None
+
+    asyncio.run(_a())
+
+
+def test_d_sysop_deletes_any_thread(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    sysop = User(username="root", groups=["sysop"])
+    s = _social_session(sysop)
+    p = app.get_plugin("mainmenu")
+
+    async def _a():
+        s._social_selected_id = "b1"  # has ana's reply
+        keys = iter(["UP", "ENTER"])
+        orig = runner.read_key
+
+        async def fake_rk(bbs, session, timeout=runner.IDLE_TIMEOUT, **kw):
+            return next(keys)
+
+        runner.read_key = fake_rk  # type: ignore[assignment]
+        try:
+            assert await p._handle_pim_key(s, "D") is True
+        finally:
+            runner.read_key = orig  # type: ignore[assignment]
+        assert await app.conversations.get_conversation("b1") is None
+
+    asyncio.run(_a())
+
+
+def test_d_on_dms_row_does_not_delete(tmp_path):
+    app = _app(tmp_path)
+    _seed(app)
+    dave = User(username="dave", groups=["sysop"])
+    s = _social_session(dave)
+    p = app.get_plugin("mainmenu")
+
+    async def _a():
+        s._pim_selected = 0
+        s._social_selected_id = "dms"
+        orig = runner.read_key
+
+        async def fake_rk(bbs, session, timeout=runner.IDLE_TIMEOUT, **kw):
+            return "ENTER"
+
+        runner.read_key = fake_rk  # type: ignore[assignment]
+        try:
+            assert await p._handle_pim_key(s, "D") is True
+        finally:
+            runner.read_key = orig  # type: ignore[assignment]
+        assert await app.conversations.get_conversation("b1") is not None
+        assert await app.conversations.get_conversation("b2") is not None
 
     asyncio.run(_a())
 

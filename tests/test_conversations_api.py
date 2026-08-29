@@ -99,6 +99,35 @@ def test_conversations_ops_via_registry(tmp_path):
     _run(_a())
 
 
+def test_conversations_delete_op(tmp_path):
+    app = _app(tmp_path)
+    dave = _user("dave")
+    ana = _user("ana")
+    sysop = _user("root", ["sysop"])
+
+    async def _a():
+        from core.ops import registry
+
+        await app.conversations.create_conversation(
+            kind="board", title="Mine", created_by="dave", conv_id="mine")
+        out = await registry.call(
+            app, dave, "conversations.delete", {"conversation_id": "mine"})
+        assert out["deleted"] == "mine"
+        assert await app.conversations.get_conversation("mine") is None
+
+        await app.conversations.create_conversation(
+            kind="board", title="Busy", created_by="dave", conv_id="busy")
+        await app.conversations.post_message("busy", author="ana", body="reply")
+        with pytest.raises(PermissionDeniedError):
+            await registry.call(
+                app, dave, "conversations.delete", {"conversation_id": "busy"})
+        out2 = await registry.call(
+            app, sysop, "conversations.delete", {"conversation_id": "busy"})
+        assert out2["deleted"] == "busy"
+
+    _run(_a())
+
+
 def test_conversations_schema_visible():
     from core.ops import registry
 
@@ -109,6 +138,7 @@ def test_conversations_schema_visible():
         "conversations.list",
         "conversations.get",
         "conversations.create",
+        "conversations.delete",
         "messages.list",
         "messages.post",
         "messages.delete",

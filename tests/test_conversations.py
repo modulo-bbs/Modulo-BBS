@@ -161,6 +161,48 @@ def test_delete_own_vs_moderator(tmp_path):
     _run(_a())
 
 
+def test_author_deletes_own_board_before_replies(tmp_path):
+    app = _app(tmp_path)
+    dave = _user("dave")
+    ana = _user("ana")
+
+    async def _a():
+        empty = await app.conversations.create_conversation(
+            kind="board", title="Empty", created_by="dave", conv_id="empty")
+        assert await app.conversations.can_delete_conversation("empty", dave)
+        assert await app.conversations.delete_conversation("empty", by_user=dave)
+        assert await app.conversations.get_conversation("empty") is None
+        assert not app.conversations._conv_dir("empty").is_dir()
+
+        own = await app.conversations.create_conversation(
+            kind="board", title="Solo", created_by="dave", conv_id="solo")
+        await app.conversations.post_message("solo", author="dave", body="just me")
+        assert await app.conversations.can_delete_conversation("solo", dave)
+        assert await app.conversations.delete_conversation("solo", by_user=dave)
+
+        replied = await app.conversations.create_conversation(
+            kind="board", title="Busy", created_by="dave", conv_id="busy")
+        await app.conversations.post_message("busy", author="dave", body="op")
+        await app.conversations.post_message("busy", author="ana", body="reply")
+        assert not await app.conversations.can_delete_conversation("busy", dave)
+        with pytest.raises(PermissionError):
+            await app.conversations.delete_conversation("busy", by_user=dave)
+        assert await app.conversations.get_conversation("busy") is not None
+
+        with pytest.raises(PermissionError):
+            await app.conversations.delete_conversation("busy", by_user=ana)
+
+        sysop = _user("root", ["sysop"])
+        assert await app.conversations.can_delete_conversation("busy", sysop)
+        await app.conversations.mark_read("dave", "busy")
+        assert await app.conversations.delete_conversation("busy", by_user=sysop)
+        assert await app.conversations.get_conversation("busy") is None
+        reads = await asyncio.to_thread(app.conversations._read_reads_sync)
+        assert "busy" not in reads.get("dave", {})
+
+    _run(_a())
+
+
 def test_find_across_conversations(tmp_path):
     app = _app(tmp_path)
 

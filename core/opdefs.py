@@ -551,6 +551,29 @@ async def _conversations_create(bbs, user, params):
     return conv
 
 
+async def _conversations_delete(bbs, user, params):
+    if user is None:
+        raise PermissionDeniedError("login required")
+    cid = params["conversation_id"]
+    conv = await bbs.conversations.get_conversation(cid)
+    if conv is None:
+        raise ValidationError(f"no such conversation: {cid}")
+    visible = await bbs.conversations.list_conversations(visible_to=user)
+    if not any(c["id"] == conv["id"] for c in visible):
+        raise PermissionDeniedError("not visible to you")
+    try:
+        ok = await bbs.conversations.delete_conversation(cid, by_user=user)
+    except PermissionError as e:
+        raise PermissionDeniedError(str(e))
+    if not ok:
+        raise ValidationError(f"no such conversation: {cid}")
+    bbs.events.emit(
+        "conversations:delete_conversation",
+        {"conversation_id": cid, "by": user.username},
+    )
+    return {"deleted": cid}
+
+
 async def _messages_list(bbs, user, params):
     conv = await bbs.conversations.get_conversation(params["conversation_id"])
     if conv is None:
@@ -640,6 +663,12 @@ registry.register(
     params={"kind": str, "title": str},
     optional={"requires": (str, ""), "participants": (str, "")},
     handler=_conversations_create,
+)
+registry.register(
+    "conversations.delete",
+    description="Delete a conversation. Sysop: any. Author: own board with no one else's posts.",
+    params={"conversation_id": str},
+    handler=_conversations_delete,
 )
 registry.register(
     "messages.list",

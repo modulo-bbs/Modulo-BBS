@@ -103,6 +103,7 @@ def test_plain_layout_widths_and_rows():
         assert "DMs" in joined
         assert "+ new thread" not in joined
         assert "N new thread" in joined
+        assert "D delete" in joined
         # board row selected marker + unread star, title capped at 15
         assert "> General Discuss" in joined and "*" in joined
         # never opened: star only, no *NEW* on the old posts

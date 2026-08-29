@@ -101,10 +101,9 @@ class SocialPlugin(Plugin):
     async def _handle_social_key(self, session, key: str) -> bool:
         """Social tab keys (boards-unification §B4). Returns True if consumed.
 
-        Browse keys (arrows/PgUp/PgDn/Space/ESC/B/ENTER) act immediately;
-        compose actions (R/N/D) drop into LINE mode via ``read_command`` —
-        per the plan's hard rule the two modes never blur, so no navigation
-        keystroke can leak into a draft.
+        Browse keys (arrows/PgUp/PgDn/Space/ESC/B/ENTER/D) act immediately;
+        N drops into LINE mode via ``read_command`` so a title prompt
+        cannot leak a navigation keystroke into a draft.
         """
         from plugins.social.social import (
             forget_social_selection,
@@ -153,6 +152,9 @@ class SocialPlugin(Plugin):
             return True
         if key == "N":
             await self._social_new_thread(session)
+            return True
+        if key == "D":
+            await self._social_delete_thread(session, rooms, sel)
             return True
         return False
 
@@ -234,6 +236,52 @@ class SocialPlugin(Plugin):
             session._social_scroll_up = 0  # type: ignore[attr-defined]
             await self.bbs.send(session, f"Thread '{title}' created.\r\n")
             return
+
+    async def _social_delete_thread(self, session, rooms, sel) -> None:
+        """D on the highlighted board: confirm, then delete if allowed.
+
+        Sysops can remove any board. The author can remove their own only
+        while nobody else has posted. The DMs aggregate is never deleted.
+        """
+        room = rooms[sel] if sel < len(rooms) else None
+        user = getattr(session, "user", None)
+        if room is None or room.kind != "board":
+            await core_modal.notice(
+                self.bbs, session, "The DMs row cannot be deleted.")
+            return
+        conv = await self.bbs.conversations.get_conversation(room.id)
+        if conv is None:
+            return
+        title = conv.get("title") or room.title or room.id
+        if not await self.bbs.conversations.can_delete_conversation(
+                room.id, user):
+            await core_modal.notice(
+                self.bbs, session,
+                "You can delete your own thread only before anyone else replies.",
+            )
+            return
+        idx = await core_modal.choose(
+            self.bbs, session,
+            [f"Delete '{title}'", "Cancel"],
+            default=1,
+        )
+        if idx != 0:
+            return
+        try:
+            ok = await self.bbs.conversations.delete_conversation(
+                room.id, by_user=user)
+        except PermissionError:
+            await core_modal.notice(
+                self.bbs, session, "You cannot delete this thread.")
+            return
+        if not ok:
+            return
+        from plugins.social.social import set_social_selection, social_rooms
+
+        leftover = await social_rooms(self.bbs.conversations, user)
+        nxt = min(sel, max(0, len(leftover) - 1))
+        set_social_selection(session, leftover, nxt)
+        session._social_scroll_up = 0  # type: ignore[attr-defined]
 
     def _social_tab_bar(self, session) -> str:
         """Same home tab row mainmenu paints above the Social pane."""

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -395,6 +396,59 @@ class Conversations:
                         c["message_count"] = max(0, c.get("message_count", 1) - 1)
                         break
                 await asyncio.to_thread(self._write_index_sync, index)
+        return True
+
+    async def can_delete_conversation(self, conv_id: str, user) -> bool:
+        """Sysop: any conversation. Author: own board with no one else's posts."""
+        if user is None:
+            return False
+        conv = await self.get_conversation(conv_id)
+        if conv is None:
+            return False
+        if user.in_group("sysop"):
+            return True
+        if conv.get("kind") != "board":
+            return False
+        if conv.get("created_by") != getattr(user, "username", None):
+            return False
+        msgs = await asyncio.to_thread(self._read_messages_sync, conv_id)
+        return all(m.get("author") == user.username for m in msgs)
+
+    async def delete_conversation(self, conv_id: str, *, by_user) -> bool:
+        """Remove a conversation, its messages, and last-read markers.
+
+        Returns True if deleted, False if it was already gone. Raises
+        PermissionError when *by_user* may not delete it.
+        """
+        conv = await self.get_conversation(conv_id)
+        if conv is None:
+            return False
+        if not await self.can_delete_conversation(conv_id, by_user):
+            raise PermissionError("cannot delete this conversation")
+        async with self._lock_for(conv_id):
+            async with self._index_lock:
+                index = await asyncio.to_thread(self._read_index_sync)
+                kept = [c for c in index if c.get("id") != conv_id]
+                if len(kept) == len(index):
+                    return False
+                await asyncio.to_thread(self._write_index_sync, kept)
+            d = self._conv_dir(conv_id)
+
+            def _rm() -> None:
+                if d.is_dir():
+                    shutil.rmtree(d, ignore_errors=True)
+
+            await asyncio.to_thread(_rm)
+            async with self._reads_lock:
+                data = await asyncio.to_thread(self._read_reads_sync)
+                changed = False
+                for mp in data.values():
+                    if conv_id in mp:
+                        del mp[conv_id]
+                        changed = True
+                if changed:
+                    await asyncio.to_thread(self._write_reads_sync, data)
+        self._locks.pop(conv_id, None)
         return True
 
     async def find_messages(
