@@ -1,6 +1,6 @@
 # dashboard
 
-Home-tab digest. Listed in `plugins/mainmenu/data/home` as `dashboard`.
+Home-tab digest. Listed in `home` as `dashboard`.
 Delete that line to drop the tab.
 
 Each loaded plugin may implement `home_digest(session)` returning

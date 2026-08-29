@@ -156,8 +156,9 @@ prevents startup. There is no `plugins.enabled` list.
 
 Core jobs (`login`, `logon`, `mainmenu`, `modal`) are mapped in `config.yaml`
 (`modal: modal`). Swap a folder with one line. The home tabs (Dashboard,
-Social, Files, Bulletins) are listed in `plugins/mainmenu/data/home` — delete
-a line to drop that tab. The logon order is `plugins/logon/data/sequence`.
+Social, Files, Bulletins) are listed in `home` at the board root — delete
+a line to drop that tab. That file is not inside the menu plugin, so a
+replacement menu still sees it. The logon order is `plugins/logon/data/sequence`.
 Restart after changes.
 
 ### HTTP Control API (shipped)

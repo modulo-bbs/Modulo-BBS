@@ -25,7 +25,7 @@ Attributes
 
     Optional home-strip attributes (used by the shipped mainmenu chrome)::
 
-        home_label   tab text when this plugin is listed in mainmenu's home file
+        home_label   tab text when this plugin is listed in the board's home file
         render_home_pane / handle_home_key / home_digest
                      see the method docs below; defaults are no-ops
 
@@ -75,7 +75,7 @@ class Plugin:
     # Group gate for appearing in menus at all (evaluated with
     # user.can_access(); empty/None = visible to everyone).
     menu_requires: list[str] | None = None
-    # Tab text when listed in plugins/mainmenu/data/home. Empty = use ``name``.
+    # Tab text when listed in the board's ``home`` file. Empty = use ``name``.
     home_label: str = ""
 
     def on_load(self, bbs: Any) -> "None | Awaitable[None]":

@@ -1,7 +1,7 @@
 # social
 
 Boards and DMs as a two-pane Social surface. Listed in
-`plugins/mainmenu/data/home` as `social`. Delete that line to drop the tab.
+`home` as `social`. Delete that line to drop the tab.
 
 ENTER on a room focuses that thread — same two-pane screen, left column
 stays. The middle divider points at the column you can move into:

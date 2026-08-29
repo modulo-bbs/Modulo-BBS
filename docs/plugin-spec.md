@@ -204,7 +204,7 @@ class Plugin:
     menu_label: str        # Display text ("[M] Message Board")
     menu_key: str          # Hotkey ("M")
     menu_order: int        # Sort order in main menu (lower = higher)
-    home_label: str        # Tab text when listed in mainmenu's home file
+    home_label: str        # Tab text when listed in the board's home file
     
     def on_load(self, bbs):
         """Called once at startup. Register event handlers."""
@@ -228,7 +228,7 @@ class Plugin:
         pass
 
     def render_home_pane(self, session) -> str:
-        """Middle pane when this plugin is listed in mainmenu's home file."""
+        """Middle pane when this plugin is listed in the board's home file."""
         return ""
 
     def handle_home_key(self, session, key) -> bool:
@@ -240,7 +240,7 @@ class Plugin:
         return None
 ```
 
-The shipped mainmenu is chrome: tab bar + `>` prompt. It reads `plugins/mainmenu/data/home` (one plugin name per line) and delegates the pane. A plugin appears on the strip only if it is loaded **and** listed. `home_label` is the tab text.
+The shipped mainmenu is chrome: tab bar + `>` prompt. It reads `home` at the board root (one plugin name per line, `core.home`) and delegates the pane. A plugin appears on the strip only if it is loaded **and** listed. `home_label` is the tab text.
 
 ### Plugin Lifecycle
 
@@ -496,7 +496,7 @@ api:                    # HTTP control API (see SysOp Guide)
   port: 8080
 
 # The logon sequence lives in plugins/logon/data/sequence (owned by logon).
-# The home tab strip lives in plugins/mainmenu/data/home (owned by mainmenu).
+# The home tab strip lives in `home` at the board root (next to config.yaml).
 # There is no global plugins.enabled list — the loader auto-discovers
 # plugins/ subdirectories.
 ```
@@ -529,7 +529,7 @@ directory layout, same rules, replaceable like any other plugin — but a board
 without them has no authentication, no menu, and no overlay picker, so they
 ship enabled by default. Swap a folder with one line in config.yaml
 (`modal: awesomemodal`). Social, files, bulletins, and dashboard are
-**optional** home tabs listed in `plugins/mainmenu/data/home`, not core roles.
+**optional** home tabs listed in the board's `home` file, not core roles.
 
 The distinction is about packaging and support, not privilege:
 

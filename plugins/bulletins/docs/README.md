@@ -3,7 +3,7 @@
 Sysop-written notices shown to users at logon (unseen ones) and re-readable
 from the menu. Group-gated; seen-tracking per user.
 
-Listed in `plugins/mainmenu/data/home` as `bulletins`. Delete that line to
+Listed in the board's `home` file as `bulletins`. Delete that line to
 drop the Bulletins tab; the logon sequence step is separate
 (`plugins/logon/data/sequence`).
 

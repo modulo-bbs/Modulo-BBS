@@ -12,7 +12,7 @@
 # the role name as the folder (login: login). Swap a folder with one line.
 #
 # The logon sequence lives in plugins/logon/data/sequence (owned by logon).
-# The home tab strip lives in plugins/mainmenu/data/home (owned by mainmenu).
+# The home tab strip lives in `home` at the board root (next to this file).
 
 server:
   host: "127.0.0.1"

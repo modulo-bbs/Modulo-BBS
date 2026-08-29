@@ -48,9 +48,9 @@ whenever you need to `await` something like `bbs.send()`.
 ### 3. Drop It In
 
 The loader discovers every package under `plugins/` that exports a `Plugin`
-subclass. Create the directory, add the plugin's `name` to
-`plugins/mainmenu/data/home` if you want it on the tab strip (one name per
-line; that file is the list), and restart. Remove the directory (or the
+subclass. Create the directory. If you want it on the tab strip, add its
+`name` as a line in the board's `home` file (next to `config.yaml`). That
+list is core, not the menu plugin's. Restart. Remove the directory (or the
 subclass) to disable it.
 
 ### 4. Restart the Server

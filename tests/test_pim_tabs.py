@@ -6,7 +6,9 @@ from pathlib import Path
 from core.app import BBSApp
 from core.user import User
 from plugins.base import Plugin
-from plugins.mainmenu.tabs import DEFAULT_HOME, load_home_names, load_tabs, visible_tabs
+from plugins.mainmenu.tabs import (
+    DEFAULT_HOME, home_file, load_home_names, load_tabs, visible_tabs,
+)
 
 
 class _Named(Plugin):
@@ -56,8 +58,7 @@ def test_visible_tabs_gating():
 def test_home_file_reorder_and_omit(tmp_path):
     app = _app(tmp_path)
     _stock(app)
-    md = app.storage.dir("mainmenu")
-    (md / "home").write_text("social\nfiles\n", encoding="utf-8")
+    home_file(app).write_text("social\nfiles\n", encoding="utf-8")
     tabs = load_tabs(app)
     assert [t["id"] for t in tabs] == ["social", "files"]
     assert tabs[0]["key"] == "1"
@@ -66,8 +67,7 @@ def test_home_file_reorder_and_omit(tmp_path):
 def test_home_skips_missing_plugin(tmp_path):
     app = _app(tmp_path)
     app.plugins = [_Named("social", "Social")]
-    md = app.storage.dir("mainmenu")
-    (md / "home").write_text("dashboard\nsocial\nfiles\n", encoding="utf-8")
+    home_file(app).write_text("dashboard\nsocial\nfiles\n", encoding="utf-8")
     tabs = load_tabs(app)
     assert [t["id"] for t in tabs] == ["social"]
 
@@ -84,11 +84,22 @@ def test_truncates_to_five(tmp_path):
     app = _app(tmp_path)
     names = [f"x{i}" for i in range(10)]
     app.plugins = [_Named(n, n.upper()) for n in names]
-    md = app.storage.dir("mainmenu")
-    (md / "home").write_text("\n".join(names) + "\n", encoding="utf-8")
+    (home_file(app)).write_text("\n".join(names) + "\n", encoding="utf-8")
     tabs = load_tabs(app)
     assert len(tabs) <= 5
     assert [t["id"] for t in tabs] == names[:5]
+
+
+def test_home_file_is_at_board_root_not_in_a_plugin(tmp_path):
+    """A replacement menu still sees the same list — it is not under mainmenu."""
+    app = _app(tmp_path)
+    _stock(app)
+    path = home_file(app)
+    assert path is not None
+    assert path.name == "home"
+    assert "mainmenu" not in path.parts
+    path.write_text("files\n", encoding="utf-8")
+    assert load_home_names(app) == ["files"]
 
 
 def test_default_home_names_when_file_missing(tmp_path):

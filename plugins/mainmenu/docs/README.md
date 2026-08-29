@@ -1,14 +1,16 @@
 # mainmenu
 
 The hub after logon: **tab bar + `>` prompt**. Panes belong to the plugins
-listed in this plugin's home file. Classic list (`home_mode=menu`) still
+listed in the board's `home` file (tree root, next to `config.yaml` — not
+this plugin's data). Classic list (`home_mode=menu`) still
 renders every loaded plugin that declares a `menu_key`, plus `[I]` / `[Q]`.
 
 ## Home file
 
-`plugins/mainmenu/data/home` — one plugin name per line, `#` comments, order
+`home` at the board root — one plugin name per line, `#` comments, order
 is tab order (keys 1–5, cap 5). Missing file → `dashboard`, `social`,
 `files`, `bulletins`. A name whose plugin is not loaded is skipped.
+A replacement menu plugin should still read this file (`core.home`).
 
 ```
 dashboard
@@ -59,4 +61,4 @@ Per-plugin menu entries come from each plugin's metadata:
 
 ## Data
 
-- `plugins/mainmenu/data/home` — home strip (shipped default; edit to taste)
+- `home` at the board root — tab strip (not this plugin; `core.home`)

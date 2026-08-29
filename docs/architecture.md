@@ -312,4 +312,4 @@ api:                   # HTTP control API, off by default
 
 There is no `plugins.enabled` list — the loader auto-discovers every
 `plugins/<name>/__init__.py`. The logon sequence is `plugins/logon/data/sequence`.
-The home tab strip is `plugins/mainmenu/data/home`.
+The home tab strip is `home` at the board root (not inside a plugin).

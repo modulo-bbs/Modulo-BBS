@@ -18,7 +18,7 @@ menu, Social, files, bulletins — each one is a folder. The core is supposed
 to stay small: sessions, users, the event bus, getting bytes to the
 terminal. If you want a feature, you write a plugin (or you ask an agent
 to, with this tree and `docs/plugin-dev.md` in front of it), drop the
-directory in, and put its name on a line in `plugins/mainmenu/data/home`
+directory in, and put its name on a line in `home` (next to `config.yaml`)
 if it belongs on the tab strip. That file is the list. Restart, and it is
 there. We want that to be easy enough that a human can do it on a weekend,
 and an agent can do it without inventing a second way to configure the board.
