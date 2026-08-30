@@ -247,13 +247,6 @@ def _tab_junction(k: int, n: int, at_right_wall: bool, b: dict) -> str:
     return b["td"]
 
 
-def _enclosure_cols(xs: list[int], active_idx: int, sep_w: int) -> tuple[int, int, int, int]:
-    """Left sep, left pad, right pad, right sep of the active tab's hint box."""
-    left_sep = xs[active_idx]
-    right_sep = xs[active_idx + 1]
-    return left_sep, left_sep + sep_w, right_sep - 1, right_sep
-
-
 def _funnel_junction(k: int, n: int, active_idx: int, at_right_wall: bool, b: dict) -> str:
     """Glyph on the hint carrier at separator *k*.
 
@@ -276,8 +269,8 @@ def _funnel_junction(k: int, n: int, active_idx: int, at_right_wall: bool, b: di
 def _build_tab_row(labels, active_idx, hint, is_plain, screen_width=79, session=None):
     """Top cap: ``┌── Dashboard ──┬ Social ┬ … ────────┐``.
 
-    The active tab's pad columns are ``┬`` in text= so they meet the
-    hint carrier's ``┴`` and the reverse-video label as one box.
+    One junction per wall. The active tab's ``┬`` is text= so it meets
+    the carrier's ``┤``/``├`` as a single stem into the reverse-video label.
     """
     wide = wide_ambiguous_for(session, is_plain)
     b = _box(is_plain)
@@ -297,34 +290,36 @@ def _build_tab_row(labels, active_idx, hint, is_plain, screen_width=79, session=
         row = overlay_display(row, x, g, screen_width, wide_ambiguous=wide)
     cells = []
     for i, lab in enumerate(labels):
-        cell = center_display(lab, widths[i], wide_ambiguous=wide) if i == active_idx else lab
+        extra = 2 if i == active_idx else 0
+        cell_w = widths[i] + extra
+        cell = center_display(lab, cell_w, wide_ambiguous=wide) if i == active_idx else lab
         if is_plain and i == active_idx:
             cell = cell.upper()
         cells.append(cell)
-        start = xs[i] + sep_w + 1
+        start = xs[i] + sep_w + (0 if i == active_idx else 1)
         row = overlay_display(row, start, cell, screen_width, wide_ambiguous=wide)
-    _left_sep, left_pad, right_pad, _right_sep = _enclosure_cols(xs, active_idx, sep_w)
-    if left_pad < right_pad:
-        row = overlay_display(row, left_pad, b["td"], screen_width, wide_ambiguous=wide)
-        row = overlay_display(row, right_pad, b["td"], screen_width, wide_ambiguous=wide)
     if is_plain:
         return row
     pal = palette_for(session)
-    tw = display_width(b["td"], wide_ambiguous=wide) or 1
-    spans = []
-    for col in (left_pad, right_pad):
-        spans.append((col, col + tw, "text"))
+    left_sep, right_sep = xs[active_idx], xs[active_idx + 1]
+    spans = [
+        (left_sep, left_sep + sep_w, "text"),
+        (right_sep, right_sep + sep_w, "text"),
+    ]
     for i, cell in enumerate(cells):
-        start = xs[i] + sep_w + 1
-        spans.append((start, start + widths[i], "tab" if i == active_idx else "muted"))
+        extra = 2 if i == active_idx else 0
+        start = xs[i] + sep_w + (0 if i == active_idx else 1)
+        spans.append((start, start + widths[i] + extra,
+                      "tab" if i == active_idx else "muted"))
     return _paint_display(row, spans, pal, wide)
 
 
 def _build_top(labels, active_idx, hint, is_plain, screen_width=79, session=None):
     """Hint carrier under the tab cap.
 
-    Verticals mark which tab the hint belongs to. Left is ``├`` while
-    Dashboard is active, ``└`` once the carrier has moved right.
+    One T per wall: ``├`` while Dashboard is active, ``└`` once the carrier
+    has moved right, ``┤``/``├`` around the hint (not a doubled ``┤┴``).
+    The hint box — walls and words — is text=.
     """
     wide = wide_ambiguous_for(session, is_plain)
     b = _box(is_plain)
@@ -335,8 +330,8 @@ def _build_top(labels, active_idx, hint, is_plain, screen_width=79, session=None
     widths, x, slot = _flow_cells(labels, hint, active_idx, wide=wide, sep=sep)
     xs = _sep_xs(widths, sep_w)
     right_x = screen_width - sep_w
-    inner = center_display(hint, slot, wide_ambiguous=wide)
-    start = x + sep_w + 1
+    inner = center_display(hint, slot + 2, wide_ambiguous=wide)
+    start = x + sep_w  # pads included; no dangling ─ outside the hint
     row = fill_display(b["h"], screen_width, wide_ambiguous=wide)
     row = overlay_display(row, start, inner, screen_width, wide_ambiguous=wide)
     n = len(labels)
@@ -345,17 +340,11 @@ def _build_top(labels, active_idx, hint, is_plain, screen_width=79, session=None
         row = overlay_display(row, col, g, screen_width, wide_ambiguous=wide)
     if xs[-1] != right_x:
         row = overlay_display(row, right_x, b["tleft"], screen_width, wide_ambiguous=wide)
-    _left_sep, left_pad, right_pad, _right_sep = _enclosure_cols(xs, active_idx, sep_w)
-    if left_pad < right_pad:
-        row = overlay_display(row, left_pad, b["tu"], screen_width, wide_ambiguous=wide)
-        row = overlay_display(row, right_pad, b["tu"], screen_width, wide_ambiguous=wide)
     if is_plain:
         return row
     pal = palette_for(session)
-    tw = display_width(b["tu"], wide_ambiguous=wide) or 1
-    spans = [(start, start + slot, "text")]
-    for col in (left_pad, right_pad):
-        spans.append((col, col + tw, "text"))
+    left_sep, right_sep = xs[active_idx], xs[active_idx + 1]
+    spans = [(left_sep, right_sep + sep_w, "text")]
     return _paint_display(row, spans, pal, wide)
 
 

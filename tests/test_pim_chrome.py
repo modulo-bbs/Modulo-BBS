@@ -305,10 +305,9 @@ def test_carrier_glyphs_follow_active_tab():
     widths, _, _ = _flow_cells(labels, hint, 0, sep=_tab_sep(False))
     xs = _sep_xs(widths, 1)
     assert at_display(dash, xs[1]) == "├"  # right of Dashboard
-    assert at_display(dash, xs[0] + 1) == "┴"  # pad T up into the tab
-    assert at_display(dash, xs[1] - 1) == "┴"
-    assert at_display(cap, xs[0] + 1) == "┬"
-    assert at_display(cap, xs[1] - 1) == "┬"
+    assert at_display(dash, xs[0] + 1) != "┴"
+    assert at_display(dash, xs[1] - 1) != "┴"
+    assert "┤┴" not in dash and "┴├" not in dash and "┬┬" not in cap
     assert at_display(dash, xs[2]) == "┴"
     assert "│ │" not in dash
 
@@ -319,11 +318,13 @@ def test_carrier_glyphs_follow_active_tab():
     assert at_display(social, 0) == "└"
     assert at_display(social, xs[1]) == "┤"
     assert at_display(social, xs[2]) == "├"
-    assert at_display(social, xs[1] + 1) == "┴"
-    assert at_display(cap1, xs[1] + 1) == "┬"
+    assert at_display(social, xs[1] + 1) != "┴"
+    assert at_display(cap1, xs[1]) == "┬"
+    assert at_display(cap1, xs[1] + 1) != "┬"
+    assert "┤┴" not in social and "┴├" not in social and "┬┬" not in cap1
     assert at_display(social, 78) == "┤"
     assert "│ │" not in social
-    assert "select" in slice_display(social, xs[1] + 2, xs[2] - 1)
+    assert "select" in slice_display(social, xs[1] + 1, xs[2])
 
     last = strip_ansi(_build_top(labels, 3, hint, False, 79, None))
     widths, _, _ = _flow_cells(labels, hint, 3, sep=_tab_sep(False))
