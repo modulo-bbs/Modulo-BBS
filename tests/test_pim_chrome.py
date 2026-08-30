@@ -305,15 +305,22 @@ def test_carrier_glyphs_follow_active_tab():
     widths, _, _ = _flow_cells(labels, hint, 0, sep=_tab_sep(False))
     xs = _sep_xs(widths, 1)
     assert at_display(dash, xs[1]) == "├"  # right of Dashboard
+    assert at_display(dash, xs[0] + 1) == "┴"  # pad T up into the tab
+    assert at_display(dash, xs[1] - 1) == "┴"
+    assert at_display(cap, xs[0] + 1) == "┬"
+    assert at_display(cap, xs[1] - 1) == "┬"
     assert at_display(dash, xs[2]) == "┴"
     assert "│ │" not in dash
 
     social = strip_ansi(_build_top(labels, 1, hint, False, 79, None))
+    cap1 = strip_ansi(_build_tab_row(labels, 1, hint, False, 79, None))
     widths, _, _ = _flow_cells(labels, hint, 1, sep=_tab_sep(False))
     xs = _sep_xs(widths, 1)
     assert at_display(social, 0) == "└"
     assert at_display(social, xs[1]) == "┤"
     assert at_display(social, xs[2]) == "├"
+    assert at_display(social, xs[1] + 1) == "┴"
+    assert at_display(cap1, xs[1] + 1) == "┬"
     assert at_display(social, 78) == "┤"
     assert "│ │" not in social
     assert "select" in slice_display(social, xs[1] + 2, xs[2] - 1)
@@ -326,4 +333,9 @@ def test_carrier_glyphs_follow_active_tab():
     if xs[4] != 78:
         assert at_display(last, xs[4]) == "├"
     assert at_display(last, 78) == "┤"
+
+    from core.theme import load_palette
+    pal = load_palette("classic")
+    assert pal.text in _build_tab_row(labels, 1, hint, False, 79, None)
+    assert pal.text in _build_top(labels, 1, hint, False, 79, None)
 
