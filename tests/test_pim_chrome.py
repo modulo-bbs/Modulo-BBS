@@ -257,3 +257,19 @@ def test_matrix_paints_list_in_phosphor(tmp_path):
     assert ANSI.BG_GREEN in text
     assert ANSI.REVERSE not in text
     assert ANSI.DIM not in text
+
+
+def test_list_row_selected_matches_idle_width():
+    """Highlighted digest row used one fewer left pad; right │ sat short."""
+    from plugins.mainmenu import _list_row
+    from core.theme import load_palette
+    from shared.visible import display_width
+
+    pal = load_palette("classic")
+    sel = _list_row("Bulletins: (no new)", True, False, pal)
+    idle = _list_row("Files: (no new)", False, False, pal)
+    assert display_width(sel) == 79
+    assert display_width(idle) == 79
+    from shared.visible import strip_ansi
+    assert strip_ansi(sel).startswith("│  ")
+    assert strip_ansi(idle).startswith("│  ")

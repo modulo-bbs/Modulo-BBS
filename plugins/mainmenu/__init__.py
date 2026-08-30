@@ -215,7 +215,9 @@ def _list_row(disp: str, selected: bool, is_plain: bool, pal, *, wide: bool = Fa
     bar = pal.frame
     rst = pal.reset
     if selected:
-        return f"{bar}│{rst}{pal.tab_fg}{pal.tab_bg} {inner} {rst}{bar}│{rst}"
+        # Same 2-col left pad as idle (`  `). One space made this row 78
+        # and the right │ sat a column left of the floor.
+        return f"{bar}│{rst}{pal.tab_fg}{pal.tab_bg}  {inner} {rst}{bar}│{rst}"
     return f"{bar}│{rst}{pal.text}  {inner} {rst}{bar}│{rst}"
 
 
