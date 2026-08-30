@@ -19,6 +19,15 @@ def vis(line: str) -> str:
     return strip_ansi(line) if line else ""
 
 
+def _all_lines_79(lines, wide=False):
+    for ln in lines:
+        v = vis(ln)
+        if not v.startswith(("│", "+", "└", "├", "┌")):
+            continue  # hint below / other chrome
+        w = display_width(ln, wide_ambiguous=wide)
+        assert w == 79, f"bad width {w} (codepoints {len(v)}): {v!r}"
+
+
 class StubConvs:
     """Canned conversations service — deterministic golden material."""
 
@@ -80,15 +89,6 @@ def _session(user=None, h=24, plain=True, sel=0):
         user=user,
         _pim_selected=sel,
     )
-
-
-def _all_lines_79(lines, wide=False):
-    for ln in lines:
-        v = vis(ln)
-        if not v.startswith(("│", "+", "└")):
-            continue  # tab bar above / hint below are not box rows
-        w = display_width(ln, wide_ambiguous=wide)
-        assert w == 79, f"bad width {w} (codepoints {len(v)}): {v!r}"
 
 
 def test_plain_layout_widths_and_rows():
@@ -307,7 +307,10 @@ def test_bottom_tee_joins_floor_and_follows_pane_focus():
         pal = load_palette("classic")
         s = _session(User(username="dave"), plain=False, sel=0)
         browse = await render_social(StubConvs(), s)
-        bot = next(ln for ln in browse.split("\r\n") if vis(ln).startswith("└"))
+        bot = next(
+            ln for ln in browse.split("\r\n")
+            if vis(ln).startswith("└") and at_display(vis(ln), 78) == "┘"
+        )
         v = vis(bot)
         assert display_width(bot, wide_ambiguous=False) == 79
         assert at_display(v, 0) == "└"
@@ -317,7 +320,10 @@ def test_bottom_tee_joins_floor_and_follows_pane_focus():
         assert pal.active + "┴" in bot
         assert pal.inactive in bot
         thread = await render_social(StubConvs(), s, compact=False)
-        tbot = next(ln for ln in thread.split("\r\n") if vis(ln).startswith("└"))
+        tbot = next(
+            ln for ln in thread.split("\r\n")
+            if vis(ln).startswith("└") and at_display(vis(ln), 78) == "┘"
+        )
         assert at_display(vis(tbot), 23) == "┴"
         assert tbot.startswith(pal.inactive + "└")
         assert pal.active + "┴" in tbot

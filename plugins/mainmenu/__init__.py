@@ -30,6 +30,7 @@ from core import runner
 from core.theme import palette_for
 from shared.visible import (
     center_display,
+    char_width,
     display_width,
     fill_display,
     fit_display,
@@ -136,9 +137,22 @@ def _strip_ansi(s: str) -> str:
 
 
 def _tab_sep(is_plain: bool) -> str:
-    """Tab cell bars. ASCII pipe on dumb terminals; box ``│`` everywhere else
-    so the strip matches the pane frame under it."""
+    """Width probe for a tab junction. ASCII ``+``/``|`` on dumb terminals;
+    CP437 box glyphs everywhere else (same cell width as ``│``)."""
     return "|" if is_plain else "│"
+
+
+def _box(is_plain: bool) -> dict:
+    """IBM box pieces (or ASCII ``+``/``-``). Junctions share ``│``'s width."""
+    if is_plain:
+        return dict(
+            h="-", tl="+", tr="+", bl="+", br="+",
+            td="+", tu="+", tright="+", tleft="+",
+        )
+    return dict(
+        h="─", tl="┌", tr="┐", bl="└", br="┘",
+        td="┬", tu="┴", tright="├", tleft="┤",
+    )
 
 
 def _hint_for_session(session) -> str:
@@ -159,9 +173,8 @@ def _hint_for_session(session) -> str:
 def _flow_cells(labels, hint, active_idx, wide=False, sep="|"):
     """Flow-tab layout math in display columns.
 
-    Shared bars: ``{sep} label {sep} label {sep}``. Doubling them ate a
-    column per tab on an 80-col ANSI screen. The ACTIVE cell is centered
-    to max(label, hint) so the funnel hint fits its stop.
+    Shared bars: one junction per tab wall, not ``│ │``. The ACTIVE cell
+    is sized to max(label, hint) so the carrier hint fits its stop.
     Returns (label widths, active_x, slot_w) where active_x is the
     display column of the active cell's opening separator.
     """
@@ -169,7 +182,7 @@ def _flow_cells(labels, hint, active_idx, wide=False, sep="|"):
         return display_width(s, wide_ambiguous=wide)
 
     sep_w = w(sep) or 1
-    # each preceding tab: space + label + space + sep
+    # each preceding tab: pad + label + pad + sep
     chrome = 2 + sep_w
     if not labels:
         return [], 0, max(w(hint), 1)
@@ -179,29 +192,146 @@ def _flow_cells(labels, hint, active_idx, wide=False, sep="|"):
     return widths, active_x, widths[active_idx]
 
 
-def _build_top(labels, active_idx, hint, is_plain, screen_width=79, session=None):
-    """Rule under the tab row, with the hint sitting in the active tab's
-    inner slot. No extra bars or corners — those read as stray glyphs.
+def _sep_xs(widths, sep_w: int) -> list[int]:
+    """Display column of each tab wall (n_tabs + 1 of them)."""
+    xs = []
+    x = 0
+    for wi in widths:
+        xs.append(x)
+        x += sep_w + 1 + wi + 1
+    xs.append(x)
+    return xs
+
+
+def _paint_display(row: str, spans: list, pal, wide: bool) -> str:
+    """Wrap *row* (no SGR) in palette roles. *spans* are (start, end, kind)."""
+    def kind_for(col: int) -> str:
+        for a, b, k in spans:
+            if a <= col < b:
+                return k
+        return "frame"
+
+    def sgr(kind: str) -> str:
+        if kind == "tab":
+            return pal.tab_fg + pal.tab_bg
+        if kind == "muted":
+            return pal.muted
+        if kind == "text":
+            return pal.text
+        return pal.frame
+
+    out: list[str] = []
+    col = 0
+    prev = None
+    for ch in row:
+        w = char_width(ch, wide_ambiguous=wide)
+        k = kind_for(col)
+        if k != prev:
+            if prev is not None:
+                out.append(pal.reset)
+            out.append(sgr(k))
+            prev = k
+        out.append(ch)
+        col += w
+    if prev is not None:
+        out.append(pal.reset)
+    return "".join(out)
+
+
+def _tab_junction(k: int, n: int, at_right_wall: bool, b: dict) -> str:
+    """Glyph on the tab cap at separator *k* (0 = far left)."""
+    if k == 0:
+        return b["tl"]
+    if k == n and at_right_wall:
+        return b["tr"]
+    return b["td"]
+
+
+def _funnel_junction(k: int, n: int, active_idx: int, at_right_wall: bool, b: dict) -> str:
+    """Glyph on the hint carrier at separator *k*.
+
+    Dashboard (tab 0) active: left is ``├`` so the pane wall continues.
+    Any later tab: left is ``└`` and the carrier's left/right are ``┤``/``├``
+    (one shared wall, not ``│ │``). Idle tab joints are ``┴``. Far right
+    of the 79-col box is always ``┤``.
     """
+    if k == 0:
+        return b["tright"] if active_idx == 0 else b["bl"]
+    if k == n and at_right_wall:
+        return b["tleft"]
+    if k == active_idx:
+        return b["tleft"]
+    if k == active_idx + 1:
+        return b["tleft"] if at_right_wall else b["tright"]
+    return b["tu"]
+
+
+def _build_tab_row(labels, active_idx, hint, is_plain, screen_width=79, session=None):
+    """Top cap: ``┌── Dashboard ──┬ Social ┬ … ────────┐``."""
     wide = wide_ambiguous_for(session, is_plain)
+    b = _box(is_plain)
     sep = _tab_sep(is_plain)
-    _w, x, slot = _flow_cells(labels, hint, active_idx, wide=wide, sep=sep)
-    fill = "-" if is_plain else "─"
-    inner = center_display(hint, slot, wide_ambiguous=wide)
-    start = x + display_width(sep, wide_ambiguous=wide) + 1  # skip "{sep} "
-    row = fill_display(fill, screen_width, wide_ambiguous=wide)
-    row = overlay_display(row, start, inner, screen_width, wide_ambiguous=wide)
+    sep_w = display_width(sep, wide_ambiguous=wide) or 1
+    if not labels:
+        return " " * screen_width
+    widths, _x, _slot = _flow_cells(labels, hint, active_idx, wide=wide, sep=sep)
+    xs = _sep_xs(widths, sep_w)
+    right_x = screen_width - sep_w
+    row = fill_display(b["h"], screen_width, wide_ambiguous=wide)
+    row = overlay_display(row, 0, b["tl"], screen_width, wide_ambiguous=wide)
+    row = overlay_display(row, right_x, b["tr"], screen_width, wide_ambiguous=wide)
+    n = len(labels)
+    for k, x in enumerate(xs):
+        g = _tab_junction(k, n, x == right_x, b)
+        row = overlay_display(row, x, g, screen_width, wide_ambiguous=wide)
+    cells = []
+    for i, lab in enumerate(labels):
+        cell = center_display(lab, widths[i], wide_ambiguous=wide) if i == active_idx else lab
+        if is_plain and i == active_idx:
+            cell = cell.upper()
+        cells.append(cell)
+        start = xs[i] + sep_w + 1
+        row = overlay_display(row, start, cell, screen_width, wide_ambiguous=wide)
     if is_plain:
         return row
-    p = palette_for(session)
-    # Colour the hint by finding it in the already-overlaid string.
-    a = row.find(inner)
-    b = a + len(inner) if a >= 0 else 0
-    if a < 0:
-        return f"{p.frame}{row}{p.reset}"
-    return (f"{p.frame}{row[:a]}{p.reset}"
-            f"{p.text}{row[a:b]}{p.reset}"
-            f"{p.frame}{row[b:]}{p.reset}")
+    pal = palette_for(session)
+    spans = []
+    for i, cell in enumerate(cells):
+        start = xs[i] + sep_w + 1
+        spans.append((start, start + widths[i], "tab" if i == active_idx else "muted"))
+    return _paint_display(row, spans, pal, wide)
+
+
+def _build_top(labels, active_idx, hint, is_plain, screen_width=79, session=None):
+    """Hint carrier under the tab cap.
+
+    Verticals mark which tab the hint belongs to. Left is ``├`` while
+    Dashboard is active, ``└`` once the carrier has moved right.
+    """
+    wide = wide_ambiguous_for(session, is_plain)
+    b = _box(is_plain)
+    sep = _tab_sep(is_plain)
+    sep_w = display_width(sep, wide_ambiguous=wide) or 1
+    if not labels:
+        return fill_display(b["h"], screen_width, wide_ambiguous=wide)
+    widths, x, slot = _flow_cells(labels, hint, active_idx, wide=wide, sep=sep)
+    xs = _sep_xs(widths, sep_w)
+    right_x = screen_width - sep_w
+    inner = center_display(hint, slot, wide_ambiguous=wide)
+    start = x + sep_w + 1
+    row = fill_display(b["h"], screen_width, wide_ambiguous=wide)
+    row = overlay_display(row, start, inner, screen_width, wide_ambiguous=wide)
+    n = len(labels)
+    for k, col in enumerate(xs):
+        g = _funnel_junction(k, n, active_idx, col == right_x, b)
+        row = overlay_display(row, col, g, screen_width, wide_ambiguous=wide)
+    if xs[-1] != right_x:
+        row = overlay_display(row, right_x, b["tleft"], screen_width, wide_ambiguous=wide)
+    if is_plain:
+        return row
+    pal = palette_for(session)
+    spans = [(start, start + slot, "text")]
+    return _paint_display(row, spans, pal, wide)
 
 
 def _list_row(disp: str, selected: bool, is_plain: bool, pal, *, wide: bool = False) -> str:
@@ -424,32 +554,17 @@ class MainmenuPlugin(Plugin):
         return ("post", "editor", "discard")[idx]
 
     def _render_tabs(self, session, tabs: list[dict], active_id: str) -> str:
-        """Tab row as ``{sep} label {sep} label {sep}`` (same _flow_cells
-        math as the funnel, so the hint lines up with the active cell)."""
+        """Tab cap ``┌── label ─┬─ label ─┐`` (same _flow_cells math as
+        the hint carrier, so the hint lines up with the active cell)."""
         is_plain = getattr(session, "terminal_type", "") in ("UNKNOWN", "dumb", "")
-        p = palette_for(session)
         labels = [x["label"] for x in tabs]
         if not labels:
             return " " * 79
         active_idx = max(0, next((i for i, x in enumerate(tabs) if x["id"] == active_id), 0))
-        hint = _hint_for_session(session)
-        wide = wide_ambiguous_for(session, is_plain)
-        sep = _tab_sep(is_plain)
-        widths, _x, _s = _flow_cells(labels, hint, active_idx, wide=wide, sep=sep)
-        parts = []
-        for i, tb in enumerate(tabs):
-            lab = tb["label"]
-            cell = center_display(lab, widths[i], wide_ambiguous=wide) if i == active_idx else lab
-            if is_plain:
-                parts.append(cell.upper() if i == active_idx else cell)
-            elif i == active_idx:
-                parts.append(f"{p.tab_fg}{p.tab_bg}{cell}{p.reset}")
-            else:
-                parts.append(f"{p.muted}{cell}{p.reset}")
-        bar = sep if is_plain else f"{p.frame}{sep}{p.reset}"
-        row = bar + "".join(f" {c} {bar}" for c in parts)
-        pad = max(0, 79 - display_width(row, wide_ambiguous=wide))
-        return row + " " * pad
+        return _build_tab_row(
+            labels, active_idx, _hint_for_session(session), is_plain,
+            screen_width=79, session=session,
+        )
 
     async def _render_pane(self, session, tab: dict) -> str:
         """Delegate the middle pane to the plugin named by this tab."""
@@ -540,8 +655,7 @@ class MainmenuPlugin(Plugin):
                     if tabs and not any(t["id"] == active_id for t in tabs):
                         active_id = tabs[0]["id"]
                         session._pim_active_tab = active_id  # type: ignore[attr-defined]
-                    # band A: tabs (funnel row in _render_pane connects
-                    # directly — no separator line, saves a row on 80x24)
+                    # band A: tab cap; hint carrier in the pane is the next row
                     tab_bar = self._render_tabs(session, tabs, active_id)
                     await self.bbs.send(session, tab_bar + "\r\n")
                     if tabs:
@@ -689,6 +803,7 @@ __all__ = [
     "MainmenuPlugin",
     "_collapse_overlay_spacing",
     "_elided",
+    "_build_tab_row",
     "_build_top",
     "_hint_for_session",
     "list_pane",

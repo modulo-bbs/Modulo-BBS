@@ -6,7 +6,10 @@ from pathlib import Path
 
 from core.app import BBSApp
 from core.user import User
+from plugins.mainmenu import _build_tab_row, _build_top, _flow_cells, _hint_for_session
+from plugins.mainmenu import _sep_xs, _tab_sep
 from server.session import Session
+from shared.visible import at_display, display_width, slice_display, strip_ansi
 
 
 class FakeWriter:
@@ -84,20 +87,29 @@ def test_pim_shows_tabs_and_pane(tmp_path):
     # pane border + hint (arrows+WASD on CP437 and UTF-8; WASD on plain)
     assert "select" in text.lower()
 
-    # hint sits in the active tab's inner slot — no extra | or corner on the rule
+    # hint sits in the active tab's inner slot, delimited by the carrier walls
     import re as _re
     def _vis(line: str) -> str:
         return _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line)
     tab_line = _vis(next(l for l in text.splitlines() if "Dashboard" in l))
-    pipes = [i for i, ch in enumerate(tab_line) if ch == "│"]
-    assert pipes, "tab bar has no delimiters"
+    assert tab_line.startswith("┌"), tab_line
+    assert tab_line.endswith("┐") or at_display(tab_line, 78) == "┐"
     assert "|" not in tab_line
     assert "│ │" not in tab_line  # shared bars, not a doubled cell wall
+    assert "┬" in tab_line
     top_line = next(l for l in text.splitlines() if "select" in l)
     stripped = _vis(top_line)
-    inner = stripped[pipes[0] + 2 : pipes[1] - 1]
+    assert stripped.startswith("├"), stripped  # Dashboard active: T into the pane
+    assert at_display(stripped, 78) == "┤"
+    assert "┴" in stripped  # idle tab joints
+    labels = ["Dashboard", "Social", "Files", "Bulletins"]
+    hint = " \x18\x19\x1B\x1A · WASD select "
+    widths, _x, _slot = _flow_cells(labels, hint, 0, wide=False, sep="│")
+    xs = _sep_xs(widths, 1)
+    inner = slice_display(stripped, xs[0] + 2, xs[1] - 1, wide_ambiguous=False)
     assert "select" in inner.lower()
-    assert "\\" not in stripped and "┐" not in stripped and "/" not in stripped
+    assert "\\" not in stripped and "/" not in stripped
+    assert "│ │" not in stripped
     # pane content includes the seeded message preview
     assert "hello world" in text or "General" in text or "dave" in text
     # prompt is pinned at bottom (contains >)
@@ -172,8 +184,8 @@ def test_social_tab_keeps_tab_bar_on_24_row_terminal(tmp_path):
     assert "Dashboard" in top and "Social" in top, f"tab bar missing: {top!r}"
 
 
-def test_utf8_social_hint_sits_under_tab_without_corners(tmp_path):
-    """The old funnel | hint \\ (then │ hint ┐) read as stray chrome."""
+def test_utf8_social_hint_carrier_joins_tabs(tmp_path):
+    """Social active: left corner closes Dashboard; hint is ┤…├ under Social."""
     import re as _re
 
     app = _app(tmp_path)
@@ -189,19 +201,20 @@ def test_utf8_social_hint_sits_under_tab_without_corners(tmp_path):
     lines = [vis(ln) for ln in raw.split("\r\n") if vis(ln).strip()]
     tab = next(ln for ln in lines if "Social" in ln and "Dashboard" in ln)
     funnel = next(ln for ln in lines if "select" in ln)
-    assert tab.startswith("│"), tab
-    assert funnel.startswith("─"), funnel
+    assert tab.startswith("┌"), tab
+    assert at_display(tab, 78) == "┐"
+    assert funnel.startswith("└"), funnel
+    assert at_display(funnel, 78) == "┤"
     assert "↑" in funnel
-    assert "\\" not in funnel and "┐" not in funnel and "|" not in funnel
-    assert "/" not in funnel
-    pipes = [i for i, ch in enumerate(tab) if ch == "│"]
-    # Shared bars: Social (tab 1) sits between pipes[1] and pipes[2].
-    # Tab row is 1-cell │ here; funnel dashes are Ambiguous — slice by
-    # display column so the hint still lines up with the tab cell.
-    from shared.visible import slice_display
-
-    assert "│ │" not in tab
-    inner = slice_display(funnel, pipes[1] + 2, pipes[2] - 1, wide_ambiguous=False)
+    assert "\\" not in funnel and "/" not in funnel and "|" not in funnel
+    assert "│ │" not in tab and "│ │" not in funnel
+    labels = ["Dashboard", "Social", "Files", "Bulletins"]
+    hint = _hint_for_session(s)
+    widths, _x, _slot = _flow_cells(labels, hint, 1, wide=False, sep="│")
+    xs = _sep_xs(widths, 1)
+    assert at_display(funnel, xs[1]) == "┤"
+    assert at_display(funnel, xs[2]) == "├"
+    inner = slice_display(funnel, xs[1] + 2, xs[2] - 1, wide_ambiguous=False)
     assert "select" in inner
 
 
@@ -218,7 +231,7 @@ def test_classic_fallback_when_home_mode_menu(tmp_path):
 
 
 def test_tab_bars_use_frame_role(tmp_path):
-    """Tab-strip │ follows frame=, not the terminal default."""
+    """Tab-strip junctions follow frame=, not the terminal default."""
     from core.theme import palette_for
 
     app = _app(tmp_path)
@@ -229,7 +242,7 @@ def test_tab_bars_use_frame_role(tmp_path):
     pal = palette_for(s)
     raw_tab = next(l for l in s.writer.text().splitlines() if "Dashboard" in l)
     assert pal.frame in raw_tab
-    assert "│" in raw_tab
+    assert "┌" in raw_tab and "┬" in raw_tab
     from shared.telnet_protocol import ANSI
 
     app = _app(tmp_path)
@@ -273,3 +286,44 @@ def test_list_row_selected_matches_idle_width():
     from shared.visible import strip_ansi
     assert strip_ansi(sel).startswith("│  ")
     assert strip_ansi(idle).startswith("│  ")
+
+
+def test_carrier_glyphs_follow_active_tab():
+    """Dashboard gets ├; later tabs close the left with └ and ┤ hint ├."""
+    labels = ["Dashboard", "Social", "Files", "Bulletins"]
+    hint = " WASD select "
+    cap = strip_ansi(_build_tab_row(labels, 0, hint, False, 79, None))
+    assert display_width(cap) == 79
+    assert at_display(cap, 0) == "┌"
+    assert at_display(cap, 78) == "┐"
+    assert "┬" in cap
+
+    dash = strip_ansi(_build_top(labels, 0, hint, False, 79, None))
+    assert display_width(dash) == 79
+    assert at_display(dash, 0) == "├"
+    assert at_display(dash, 78) == "┤"
+    widths, _, _ = _flow_cells(labels, hint, 0, sep=_tab_sep(False))
+    xs = _sep_xs(widths, 1)
+    assert at_display(dash, xs[1]) == "├"  # right of Dashboard
+    assert at_display(dash, xs[2]) == "┴"
+    assert "│ │" not in dash
+
+    social = strip_ansi(_build_top(labels, 1, hint, False, 79, None))
+    widths, _, _ = _flow_cells(labels, hint, 1, sep=_tab_sep(False))
+    xs = _sep_xs(widths, 1)
+    assert at_display(social, 0) == "└"
+    assert at_display(social, xs[1]) == "┤"
+    assert at_display(social, xs[2]) == "├"
+    assert at_display(social, 78) == "┤"
+    assert "│ │" not in social
+    assert "select" in slice_display(social, xs[1] + 2, xs[2] - 1)
+
+    last = strip_ansi(_build_top(labels, 3, hint, False, 79, None))
+    widths, _, _ = _flow_cells(labels, hint, 3, sep=_tab_sep(False))
+    xs = _sep_xs(widths, 1)
+    assert at_display(last, 0) == "└"
+    assert at_display(last, xs[3]) == "┤"
+    if xs[4] != 78:
+        assert at_display(last, xs[4]) == "├"
+    assert at_display(last, 78) == "┤"
+
